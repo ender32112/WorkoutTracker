@@ -1,7 +1,11 @@
 package com.example.workouttracker.ui.nutrition
 
-import java.util.*
+import java.util.UUID
 
+/**
+ * Модель записи питания.
+ * Все параметры именованные — порядок не важен.
+ */
 data class NutritionEntry(
     val id: UUID = UUID.randomUUID(),
     val date: String,

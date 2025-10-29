@@ -5,7 +5,8 @@ import java.util.*
 data class ExerciseEntry(
     val name: String,
     val sets: Int,
-    val reps: Int
+    val reps: Int,
+    val weight: Float = 0f
 )
 
 data class TrainingSession(

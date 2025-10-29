@@ -1,62 +1,64 @@
 package com.example.workouttracker.ui.navigation
 
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Icon
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.workouttracker.ui.achievements.AchievementsScreen
+import com.example.workouttracker.ui.analytics.AnalyticsScreen
 import com.example.workouttracker.ui.articles.ArticlesScreen
 import com.example.workouttracker.ui.nutrition.NutritionScreen
 import com.example.workouttracker.ui.profile.ProfileScreen
 import com.example.workouttracker.ui.training.TrainingScreen
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.wrapContentHeight
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.wrapContentSize
-import androidx.compose.ui.Alignment
 import com.example.workouttracker.viewmodel.ArticleViewModel
+import com.example.workouttracker.viewmodel.ArticleViewModelFactory
 import com.example.workouttracker.viewmodel.AuthViewModel
 import com.example.workouttracker.viewmodel.TrainingViewModel
 
-
-
-
 @Composable
-fun MainScreen(trainingViewModel: TrainingViewModel, articleViewModel: ArticleViewModel) {
+fun MainScreen() {
     val navController = rememberNavController()
 
+    // Создаём TrainingViewModel
+    val trainingViewModel: TrainingViewModel = viewModel()
+
+    // Создаём ArticleViewModel через фабрику
+    val articleViewModel: ArticleViewModel = viewModel(
+        factory = ArticleViewModelFactory(trainingViewModel)
+    )
+
+    // AuthViewModel
     val authViewModel: AuthViewModel = viewModel()
-        val items = listOf(
+
+    // Пункты навигации
+    val items = listOf(
         BottomNavItem.Training,
         BottomNavItem.Nutrition,
+        BottomNavItem.Analytics,
         BottomNavItem.Articles,
         BottomNavItem.Achieve,
         BottomNavItem.Profile
     )
+
     Scaffold(
         bottomBar = {
             NavigationBar {
-                val current = navController.currentBackStackEntryAsState().value?.destination?.route
+                val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
                 items.forEach { item ->
                     NavigationBarItem(
                         icon = {
                             Box(
                                 modifier = Modifier
-                                    .wrapContentSize()               // по ширине тащим
-                                    .wrapContentHeight(),         // высоту — по контенту
-                                contentAlignment = Alignment.BottomCenter // «прижимаем» вниз
+                                    .wrapContentSize()
+                                    .wrapContentHeight(),
+                                contentAlignment = Alignment.BottomCenter
                             ) {
                                 Icon(
                                     imageVector = item.icon,
@@ -66,12 +68,12 @@ fun MainScreen(trainingViewModel: TrainingViewModel, articleViewModel: ArticleVi
                             }
                         },
                         label = { Text(item.title) },
-                        selected = current == item.route,
+                        selected = currentRoute == item.route,
                         onClick = {
-                            if (current != item.route) {
+                            if (currentRoute != item.route) {
                                 navController.navigate(item.route) {
                                     launchSingleTop = true
-                                    restoreState    = true
+                                    restoreState = true
                                     popUpTo(navController.graph.startDestinationId) {
                                         saveState = true
                                     }
@@ -81,7 +83,7 @@ fun MainScreen(trainingViewModel: TrainingViewModel, articleViewModel: ArticleVi
                     )
                 }
             }
-        },
+        }
     ) { innerPadding ->
         NavHost(
             navController = navController,
@@ -89,33 +91,39 @@ fun MainScreen(trainingViewModel: TrainingViewModel, articleViewModel: ArticleVi
             modifier = Modifier.padding(innerPadding)
         ) {
             composable(BottomNavItem.Training.route) {
-                TrainingScreen(trainingViewModel)
+                TrainingScreen(trainingViewModel = trainingViewModel)
             }
+
             composable(BottomNavItem.Nutrition.route) {
                 NutritionScreen()
             }
+
+            composable(BottomNavItem.Analytics.route) {
+                AnalyticsScreen()
+            }
+
             composable(BottomNavItem.Articles.route) {
                 ArticlesScreen(
                     trainingViewModel = trainingViewModel,
-                    articleViewModel  = articleViewModel
+                    articleViewModel = articleViewModel
                 )
             }
+
             composable(BottomNavItem.Achieve.route) {
-                AchievementsScreen(
-                    articleViewModel  = articleViewModel)
+                AchievementsScreen(articleViewModel = articleViewModel)
             }
+
             composable(BottomNavItem.Profile.route) {
-                val authViewModel: AuthViewModel = viewModel()
                 ProfileScreen(
                     authViewModel = authViewModel,
                     onLogout = {
                         authViewModel.logout()
                         navController.navigate("login") {
-                            popUpTo(navController.graph.startDestinationId) { inclusive = true }
+                            popUpTo(0) { inclusive = true }
                         }
                     }
                 )
+            }
         }
     }
-}
 }

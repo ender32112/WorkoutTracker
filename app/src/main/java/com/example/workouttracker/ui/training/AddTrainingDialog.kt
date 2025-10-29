@@ -3,22 +3,15 @@ package com.example.workouttracker.ui.training
 import android.app.DatePickerDialog
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import java.text.SimpleDateFormat
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.runtime.remember
-import androidx.compose.ui.unit.dp
 import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -27,94 +20,123 @@ fun AddTrainingDialog(
     onSave: (TrainingSession) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var date by remember { mutableStateOf(
-        SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-    ) }
+    var date by remember {
+        mutableStateOf(SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()))
+    }
     var showDatePicker by remember { mutableStateOf(false) }
+    val context = LocalContext.current
 
-    val allExercises = listOf("Жим штанги лежа", "Присед Смит", "Тяга верхнего блока", "Становая тяга", "Румынская тяга", "Бёрпи", "Подтягивания", "Выпады")
+    val allExercises = listOf(
+        "Жим штанги лежа", "Присед Смит", "Тяга верхнего блока",
+        "Становая тяга", "Румынская тяга", "Бёрпи", "Подтягивания", "Выпады"
+    )
     var entries by remember { mutableStateOf(listOf<ExerciseEntry>()) }
 
-
+    var expanded by remember { mutableStateOf(false) }
     var selectedName by remember { mutableStateOf(allExercises.first()) }
     var sets by remember { mutableStateOf("") }
     var reps by remember { mutableStateOf("") }
+    var weight by remember { mutableStateOf("") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Добавить тренировку") },
+        title = { Text("Новая тренировка", style = MaterialTheme.typography.titleLarge) },
         text = {
             Column(
-                Modifier
+                modifier = Modifier
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState())
+                    .padding(8.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-
-                Button(onClick = { showDatePicker = true }) {
-                    Text("Дата тренировки: $date")
-                }
-                Spacer(Modifier.height(8.dp))
-
-
-                Text("Новое упражнение", style = MaterialTheme.typography.titleSmall)
-
-                ExposedDropdownMenuBox(
-                    expanded = false,
-                    onExpandedChange = {}
+                // Дата
+                OutlinedButton(
+                    onClick = { showDatePicker = true },
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    TextField(
+                    Text("Дата: $date")
+                }
+
+                // Упражнение
+                ExposedDropdownMenuBox(
+                    expanded = expanded,
+                    onExpandedChange = { expanded = !expanded }
+                ) {
+                    OutlinedTextField(
                         value = selectedName,
                         onValueChange = {},
                         label = { Text("Упражнение") },
                         readOnly = true,
-                        trailingIcon = { /* стрелка */ }
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                        modifier = Modifier
+                            .menuAnchor()
+                            .fillMaxWidth()
                     )
-
-                }
-
-                allExercises.forEach { name ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(
-                            selected = selectedName == name,
-                            onClick = { selectedName = name }
-                        )
-                        Text(name)
+                    ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                        allExercises.forEach { name ->
+                            DropdownMenuItem(
+                                text = { Text(name) },
+                                onClick = {
+                                    selectedName = name
+                                    expanded = false
+                                }
+                            )
+                        }
                     }
                 }
-                Spacer(Modifier.height(4.dp))
 
+                // Поля
                 OutlinedTextField(
                     value = sets,
-                    onValueChange = { sets = it },
+                    onValueChange = { sets = it.filter { it.isDigit() } },
                     label = { Text("Подходы") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = reps,
-                    onValueChange = { reps = it },
-                    label = { Text("Повторы в подходе") },
+                    onValueChange = { reps = it.filter { it.isDigit() } },
+                    label = { Text("Повторы") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth()
                 )
-                Spacer(Modifier.height(8.dp))
-                Button(onClick = {
-                    val entry = ExerciseEntry(
-                        name = selectedName,
-                        sets = sets.toIntOrNull() ?: 0,
-                        reps = reps.toIntOrNull() ?: 0
-                    )
-                    entries = entries + entry
-                    sets = ""
-                    reps = ""
-                }) {
+                OutlinedTextField(
+                    value = weight,
+                    onValueChange = { weight = it.filter { it.isDigit() || it == '.' } },
+                    label = { Text("Вес (кг)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                // Добавить
+                Button(
+                    onClick = {
+                        val entry = ExerciseEntry(
+                            name = selectedName,
+                            sets = sets.toIntOrNull() ?: 1,
+                            reps = reps.toIntOrNull() ?: 1,
+                            weight = weight.toFloatOrNull() ?: 0f
+                        )
+                        entries = entries + entry
+                        sets = ""; reps = ""; weight = ""
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                     Text("Добавить упражнение")
                 }
-                Spacer(Modifier.height(12.dp))
 
-
+                // Список
                 if (entries.isNotEmpty()) {
-                    Text("Упражнения в сессии:", style = MaterialTheme.typography.titleSmall)
-                    entries.forEach {
-                        Text("• ${it.name}: ${it.sets}×${it.reps}")
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text("Упражнения:", style = MaterialTheme.typography.titleMedium)
+                            entries.forEach {
+                                Text("• ${it.name}: ${it.sets}×${it.reps} @ ${it.weight}кг")
+                            }
+                        }
                     }
                 }
             }
@@ -122,6 +144,7 @@ fun AddTrainingDialog(
         confirmButton = {
             TextButton(onClick = {
                 onSave(TrainingSession(date = date, exercises = entries))
+                onDismiss()
             }) {
                 Text("Сохранить")
             }
@@ -134,12 +157,14 @@ fun AddTrainingDialog(
     if (showDatePicker) {
         val c = Calendar.getInstance()
         DatePickerDialog(
-            LocalContext.current,
+            context,
             { _, y, m, d ->
                 date = String.format("%04d-%02d-%02d", y, m + 1, d)
                 showDatePicker = false
             },
-            c.get(Calendar.YEAR), c.get(Calendar.MONTH), c.get(Calendar.DAY_OF_MONTH)
+            c.get(Calendar.YEAR),
+            c.get(Calendar.MONTH),
+            c.get(Calendar.DAY_OF_MONTH)
         ).show()
     }
 }
