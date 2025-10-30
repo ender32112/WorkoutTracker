@@ -85,4 +85,10 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
         _sessions.value = _sessions.value.filterNot { it.id.toString() == id }
         saveSessions()
     }
+
+    // НОВЫЙ МЕТОД
+    fun updateSession(updated: TrainingSession) {
+        _sessions.value = _sessions.value.map { if (it.id == updated.id) updated else it }
+        saveSessions()
+    }
 }
