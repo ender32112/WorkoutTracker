@@ -79,7 +79,10 @@ fun ProfileScreen(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text("Профиль", style = MaterialTheme.typography.headlineMedium)
-            Button(onClick = onLogout) {
+            Button(onClick = {
+                authViewModel.logout()
+                onLogout()
+            }) {
                 Text("Выйти")
             }
         }
