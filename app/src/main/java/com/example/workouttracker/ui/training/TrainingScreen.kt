@@ -1,16 +1,18 @@
 package com.example.workouttracker.ui.training
 
-import android.app.DatePickerDialog
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.workouttracker.viewmodel.TrainingViewModel
@@ -20,22 +22,19 @@ import java.util.*
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TrainingScreen(
-    trainingViewModel: TrainingViewModel
+    trainingViewModel: TrainingViewModel = viewModel()
 ) {
-
     val sessions by trainingViewModel.sessions.collectAsState()
-
-
-    var showDialog by remember { mutableStateOf(false) }
+    var showAddDialog by remember { mutableStateOf(false) }
+    var editingSession by remember { mutableStateOf<TrainingSession?>(null) }
 
     Scaffold(
         floatingActionButton = {
-            FloatingActionButton(onClick = { showDialog = true }) {
-                Icon(Icons.Default.Add, contentDescription = "Добавить тренировку")
+            FloatingActionButton(onClick = { showAddDialog = true }) {
+                Icon(Icons.Default.Add, contentDescription = "Добавить")
             }
         }
     ) { innerPadding ->
-
         if (sessions.isEmpty()) {
             Box(
                 modifier = Modifier
@@ -43,65 +42,97 @@ fun TrainingScreen(
                     .padding(innerPadding),
                 contentAlignment = Alignment.Center
             ) {
-                Text("Пока нет тренировок")
+                Text("Нет тренировок", style = MaterialTheme.typography.bodyLarge)
             }
         } else {
             LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
+                modifier = Modifier.padding(innerPadding),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                items(sessions) { session ->
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(8.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.Top
-                        ) {
-                            Column {
-                                Text(
-                                    "Дата: ${session.date}",
-                                    style = MaterialTheme.typography.titleMedium
-                                )
-                                Spacer(Modifier.height(8.dp))
-                                session.exercises.forEach { ex ->
-                                    Text(
-                                        "• ${ex.name}: ${ex.sets}×${ex.reps}",
-                                        style = MaterialTheme.typography.bodyLarge
-                                    )
-                                }
-                            }
-                            IconButton(onClick = {
-                                trainingViewModel.removeSession(session.id.toString())
-                            }) {
-                                Icon(
-                                    Icons.Default.Delete,
-                                    contentDescription = "Удалить тренировку"
-                                )
-                            }
-                        }
-                    }
+                items(sessions.reversed()) { session ->
+                    TrainingCard(
+                        session = session,
+                        onEdit = { editingSession = session },
+                        onDelete = { trainingViewModel.removeSession(session.id.toString()) }
+                    )
                 }
             }
         }
 
-
-        if (showDialog) {
+        if (showAddDialog || editingSession != null) {
             AddTrainingDialog(
-                onSave = {
-                    trainingViewModel.addSession(it)
-                    showDialog = false
+                session = editingSession,
+                onSave = { newSession ->
+                    if (editingSession != null) {
+                        trainingViewModel.updateSession(newSession)
+                    } else {
+                        trainingViewModel.addSession(newSession)
+                    }
+                    showAddDialog = false
+                    editingSession = null
                 },
                 onDismiss = {
-                    showDialog = false
+                    showAddDialog = false
+                    editingSession = null
                 }
             )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TrainingCard(
+    session: TrainingSession,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Card(
+        onClick = { expanded = !expanded },
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(4.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column {
+                    Text(
+                        text = formatDateForDisplay(session.date),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "${session.exercises.size} упр. • ${session.totalVolume} кг",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                }
+                Row {
+                    IconButton(onClick = onEdit) {
+                        Icon(Icons.Default.Edit, contentDescription = "Редактировать")
+                    }
+                    IconButton(onClick = onDelete) {
+                        Icon(Icons.Default.Delete, contentDescription = "Удалить", tint = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+
+            AnimatedVisibility(expanded) {
+                Column(modifier = Modifier.padding(top = 12.dp)) {
+                    session.exercises.forEach { ex ->
+                        Text(
+                            text = "• ${ex.name}: ${ex.sets}×${ex.reps} @ ${ex.weight} кг",
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(vertical = 2.dp)
+                        )
+                    }
+                }
+            }
         }
     }
 }
