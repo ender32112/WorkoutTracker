@@ -9,10 +9,10 @@ sealed class BottomNavItem(
     val icon: ImageVector,
     val title: String
 ) {
-    object Training : BottomNavItem("training", Icons.Default.FitnessCenter, "Тренировки")
-    object Nutrition: BottomNavItem("nutrition", Icons.Default.Restaurant, "Питание")
-    object Analytics : BottomNavItem("analytics", Icons.Default.Analytics, "Аналитика")
-    object Articles : BottomNavItem("articles", Icons.Default.MenuBook, "Статьи")
-    object Achieve : BottomNavItem("achievements", Icons.Default.EmojiEvents, "Достижения")
-    object Profile  : BottomNavItem("profile", Icons.Default.AccountCircle, "Профиль")
+    data object Training : BottomNavItem("training", Icons.Default.FitnessCenter, "Тренировки")
+    data object Nutrition : BottomNavItem("nutrition", Icons.Default.RestaurantMenu, "Питание")
+    data object Analytics : BottomNavItem("analytics", Icons.Default.BarChart, "Аналитика")
+    data object Articles : BottomNavItem("articles", Icons.Default.Article, "Статьи")
+    data object Achieve : BottomNavItem("achievements", Icons.Default.Star, "Достижения")
+    data object Profile : BottomNavItem("profile", Icons.Default.Person, "Профиль")
 }
