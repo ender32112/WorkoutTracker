@@ -53,6 +53,7 @@ dependencies {
     implementation(libs.androidx.compose.foundation)
     implementation(libs.firebase.crashlytics.buildtools)
     implementation(libs.androidx.navigation.runtime.ktx)
+    implementation(libs.androidx.compose.animation.core)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
