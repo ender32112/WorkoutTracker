@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.WorkoutTracker" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- БАЗОВАЯ ТЕМА ДЛЯ API 21+ -->
+    <style name="Theme.WorkoutTracker" parent="android:Theme.Material.Light.NoActionBar">
+        <!-- Отключаем системные цвета -->
+    </style>
+
 </resources>

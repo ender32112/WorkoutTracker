@@ -4,6 +4,8 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+
+
 android {
     namespace = "com.example.workouttracker"
     compileSdk = 35
@@ -53,6 +55,7 @@ dependencies {
     implementation(libs.androidx.compose.foundation)
     implementation(libs.firebase.crashlytics.buildtools)
     implementation(libs.androidx.navigation.runtime.ktx)
+    implementation(libs.androidx.compose.animation.core)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -81,6 +84,16 @@ dependencies {
 
     // Coil для загрузки изображений
     implementation("io.coil-kt:coil-compose:2.2.2")
+
+    // Google Fit
+    implementation("com.google.android.gms:play-services-fitness:21.1.0")
+    implementation("com.google.android.gms:play-services-location:21.0.1")
+    // Погода
+    implementation("com.squareup.retrofit2:retrofit:2.9.0")
+    implementation("com.squareup.retrofit2:converter-gson:2.9.0")
+    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
+    // Графики
+    implementation("com.github.PhilJay:MPAndroidChart:v3.1.0")
 
     // (можно опционально оставить для отладки)
     debugImplementation("androidx.compose.ui:ui-tooling")

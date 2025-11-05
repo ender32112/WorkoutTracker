@@ -10,35 +10,24 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-/**
- * ViewModel для раздела питания.
- * Сохраняет записи в SharedPreferences (без Gson).
- * Поддерживает норму КБЖУ.
- */
 class NutritionViewModel(application: Application) : AndroidViewModel(application) {
 
-    // SharedPreferences для хранения записей
     private val prefs = application.getSharedPreferences("nutrition_prefs", Context.MODE_PRIVATE)
-
-    // Состояние списка записей
     private val _entries = MutableStateFlow<List<NutritionEntry>>(emptyList())
     val entries: StateFlow<List<NutritionEntry>> = _entries
 
-    // Норма КБЖУ (можно вынести в настройки)
-    val dailyNorm = mapOf(
-        "calories" to 2500,
-        "protein"  to 120,
-        "carbs"    to 300,
-        "fats"     to 80
-    )
+    var dailyNorm = mapOf<String, Int>()
 
     init {
+        dailyNorm = mapOf(
+            "calories" to prefs.getInt("norm_calories", 2500),
+            "protein" to prefs.getInt("norm_protein", 120),
+            "carbs" to prefs.getInt("norm_carbs", 300),
+            "fats" to prefs.getInt("norm_fats", 80)
+        )
         loadEntries()
     }
 
-    /**
-     * Загружает записи из SharedPreferences
-     */
     private fun loadEntries() {
         val jsonString = prefs.getString("entries", null) ?: return
         try {
@@ -50,6 +39,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                     NutritionEntry(
                         id = UUID.fromString(obj.getString("id")),
                         date = obj.getString("date"),
+                        name = obj.getString("name"),
                         calories = obj.getInt("calories"),
                         protein = obj.getInt("protein"),
                         carbs = obj.getInt("carbs"),
@@ -60,14 +50,10 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             _entries.value = list
         } catch (e: Exception) {
             e.printStackTrace()
-            // При ошибке — очищаем
             prefs.edit().remove("entries").apply()
         }
     }
 
-    /**
-     * Сохраняет записи в SharedPreferences
-     */
     private fun saveEntries() {
         try {
             val jsonArray = JSONArray()
@@ -76,6 +62,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                     JSONObject().apply {
                         put("id", entry.id.toString())
                         put("date", entry.date)
+                        put("name", entry.name)
                         put("calories", entry.calories)
                         put("protein", entry.protein)
                         put("carbs", entry.carbs)
@@ -89,19 +76,29 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    /**
-     * Добавляет новую запись
-     */
     fun addEntry(entry: NutritionEntry) {
         _entries.value = _entries.value + entry
         saveEntries()
     }
 
-    /**
-     * Удаляет запись по ID
-     */
     fun removeEntry(id: UUID) {
         _entries.value = _entries.value.filterNot { it.id == id }
         saveEntries()
+    }
+
+    fun updateEntry(updated: NutritionEntry) {
+        _entries.value = _entries.value.map { if (it.id == updated.id) updated else it }
+        saveEntries()
+    }
+
+    fun updateNorm(norm: Map<String, Int>) {
+        dailyNorm = norm
+        with(prefs.edit()) {
+            putInt("norm_calories", norm["calories"]!!)
+            putInt("norm_protein", norm["protein"]!!)
+            putInt("norm_carbs", norm["carbs"]!!)
+            putInt("norm_fats", norm["fats"]!!)
+            apply()
+        }
     }
 }

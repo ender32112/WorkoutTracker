@@ -26,7 +26,7 @@ data class User(
     val chest: Float,
     val measurementDate: String,
     val goalName: String,
-    val goalDeadline: String
+    val goalDeadline: String,
 )
 
 class AuthViewModel(application: Application) : AndroidViewModel(application) {
