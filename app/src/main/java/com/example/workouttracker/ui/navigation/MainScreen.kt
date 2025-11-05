@@ -1,5 +1,6 @@
 package com.example.workouttracker.ui.navigation
 
+import android.app.Application
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.layout.*
@@ -12,6 +13,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -25,16 +27,25 @@ import com.example.workouttracker.viewmodel.ArticleViewModel
 import com.example.workouttracker.viewmodel.ArticleViewModelFactory
 import com.example.workouttracker.viewmodel.AuthViewModel
 import com.example.workouttracker.viewmodel.TrainingViewModel
+import com.example.workouttracker.viewmodel.AchievementViewModel
+import com.example.workouttracker.viewmodel.AchievementViewModelFactory
 
 @Composable
 fun MainScreen(navController: NavController) {
     val trainingViewModel: TrainingViewModel = viewModel()
+    val context = LocalContext.current
+    val application = context.applicationContext as Application
+
     val articleViewModel: ArticleViewModel = viewModel(
-        factory = ArticleViewModelFactory(trainingViewModel)
+        factory = ArticleViewModelFactory(trainingViewModel, application)
     )
     val authViewModel: AuthViewModel = viewModel()
 
-    // Состояние выбранного таба
+    // AchievementViewModel
+    val achievementViewModel: AchievementViewModel = viewModel(
+        factory = AchievementViewModelFactory(trainingViewModel, articleViewModel, application)
+    )
+
     var selectedRoute by remember { mutableStateOf(BottomNavItem.Training.route) }
 
     val items = listOf(
@@ -52,7 +63,7 @@ fun MainScreen(navController: NavController) {
                 items = items,
                 selectedRoute = selectedRoute,
                 onItemSelected = { route ->
-                    selectedRoute = route // ← Просто меняем состояние
+                    selectedRoute = route
                 }
             )
         }
@@ -68,7 +79,11 @@ fun MainScreen(navController: NavController) {
                     BottomNavItem.Nutrition.route -> NutritionScreen()
                     BottomNavItem.Analytics.route -> AnalyticsScreen()
                     BottomNavItem.Articles.route -> ArticlesScreen(trainingViewModel, articleViewModel)
-                    BottomNavItem.Achieve.route -> AchievementsScreen(articleViewModel)
+                    BottomNavItem.Achieve.route -> AchievementsScreen(
+                        trainingViewModel = trainingViewModel,
+                        articleViewModel = articleViewModel,
+                        achievementViewModel = achievementViewModel
+                    )
                     BottomNavItem.Profile.route -> ProfileScreen(authViewModel) {
                         authViewModel.logout()
                         navController.navigate("login") { popUpTo(0) { inclusive = true } }
