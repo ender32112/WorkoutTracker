@@ -1,13 +1,14 @@
 package com.example.workouttracker.ui.nutrition
 
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -15,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.workouttracker.viewmodel.NutritionViewModel
+import com.example.workouttracker.ui.components.SectionHeader
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -32,35 +34,41 @@ fun NutritionScreen(
     val grouped = entries.groupBy { it.date }.toSortedMap(compareByDescending { it })
     val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
     val todayTotal = grouped[today]?.fold(
-        NutritionEntry(id = UUID.randomUUID(), date = today, name = "", calories = 0, protein = 0, carbs = 0, fats = 0)
+        NutritionEntry(date = today, name = "", calories = 0, protein = 0, carbs = 0, fats = 0, weight = 0)
     ) { acc, e ->
         acc.copy(
             calories = acc.calories + e.calories,
             protein = acc.protein + e.protein,
             carbs = acc.carbs + e.carbs,
-            fats = acc.fats + e.fats
+            fats = acc.fats + e.fats,
+            weight = acc.weight + e.weight
         )
-    } ?: NutritionEntry(id = UUID.randomUUID(), date = today, name = "", calories = 0, protein = 0, carbs = 0, fats = 0)
+    } ?: NutritionEntry(date = today, name = "", calories = 0, protein = 0, carbs = 0, fats = 0, weight = 0)
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("Питание") },
+            // ЕДИНАЯ ШАПКА
+            SectionHeader(
+                title = "Питание",
+                titleStyle = MaterialTheme.typography.headlineSmall,
+                // height = 48.dp,
                 actions = {
                     IconButton(onClick = { showSettings = true }) {
-                        Icon(Icons.Filled.Settings, "Настройки")
+                        Icon(Icons.Filled.Settings, contentDescription = "Настройки")
                     }
                 }
             )
         },
         floatingActionButton = {
             FloatingActionButton(onClick = { showAddDialog = true }) {
-                Icon(Icons.Filled.Add, "Добавить")
+                Icon(Icons.Filled.Add, contentDescription = "Добавить")
             }
         }
     ) { padding ->
         LazyColumn(
-            modifier = Modifier.padding(padding).fillMaxSize(),
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxSize(),
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
@@ -99,7 +107,6 @@ fun NutritionScreen(
         }
     }
 
-    // === ДИАЛОГ ДОБАВЛЕНИЯ ===
     if (showAddDialog) {
         AddNutritionDialog(
             onConfirm = { newEntry ->
@@ -110,7 +117,6 @@ fun NutritionScreen(
         )
     }
 
-    // === ДИАЛОГ РЕДАКТИРОВАНИЯ ===
     editEntry?.let { entry ->
         AddNutritionDialog(
             entry = entry,
@@ -122,20 +128,19 @@ fun NutritionScreen(
         )
     }
 
-    // === ДИАЛОГ НАСТРОЕК — ИСПРАВЛЕНО! ===
     if (showSettings) {
         SettingsDialog(
             currentNorm = viewModel.dailyNorm,
             onSave = { norm ->
                 viewModel.updateNorm(norm)
-                showSettings = false  // ← ЗАКРЫВАЕМ ПОСЛЕ СОХРАНЕНИЯ
+                showSettings = false
             },
             onDismiss = { showSettings = false }
         )
     }
 }
 
-// === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
+// ——— Вспомогательные UI ———
 
 @Composable
 fun TodayCard(todayTotal: NutritionEntry, norm: Map<String, Int>) {
@@ -160,13 +165,10 @@ fun TodayCard(todayTotal: NutritionEntry, norm: Map<String, Int>) {
 @Composable
 fun MacroProgress(label: String, value: Int, norm: Int) {
     val progress = (value.coerceAtMost(norm).toFloat() / norm).coerceIn(0f, 1f)
-    val animatedProgress by animateFloatAsState(targetValue = progress, animationSpec = tween(300))
-    Column {
-        Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-            Text(label, style = MaterialTheme.typography.bodyMedium)
-            Text("$value / $norm", style = MaterialTheme.typography.bodySmall)
-        }
-        LinearProgressIndicator(progress = { animatedProgress }, modifier = Modifier.fillMaxWidth())
+    LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
+    Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+        Text("$value / $norm", style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -189,12 +191,12 @@ fun NutritionEntryCard(entry: NutritionEntry, onEdit: () -> Unit, onDelete: () -
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(entry.name, style = MaterialTheme.typography.titleMedium)
-                Text("${entry.calories} ккал", style = MaterialTheme.typography.bodyMedium)
-                Text("Б:${entry.protein} Ж:${entry.fats} У:${entry.carbs}", style = MaterialTheme.typography.bodySmall)
+                Text("${entry.calories} ккал • ${entry.weight} г", style = MaterialTheme.typography.bodyMedium)
+                Text("Б:${entry.protein}  Ж:${entry.fats}  У:${entry.carbs}", style = MaterialTheme.typography.bodySmall)
             }
             Row {
-                IconButton(onClick = onEdit) { Icon(Icons.Filled.Edit, "Редактировать") }
-                IconButton(onClick = onDelete) { Icon(Icons.Filled.Delete, "Удалить") }
+                IconButton(onClick = onEdit) { Icon(Icons.Filled.Edit, contentDescription = "Редактировать") }
+                IconButton(onClick = onDelete) { Icon(Icons.Filled.Delete, contentDescription = "Удалить") }
             }
         }
     }

@@ -21,9 +21,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     init {
         dailyNorm = mapOf(
             "calories" to prefs.getInt("norm_calories", 2500),
-            "protein" to prefs.getInt("norm_protein", 120),
-            "carbs" to prefs.getInt("norm_carbs", 300),
-            "fats" to prefs.getInt("norm_fats", 80)
+            "protein"  to prefs.getInt("norm_protein", 120),
+            "carbs"    to prefs.getInt("norm_carbs", 300),
+            "fats"     to prefs.getInt("norm_fats", 80)
         )
         loadEntries()
     }
@@ -43,7 +43,8 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                         calories = obj.getInt("calories"),
                         protein = obj.getInt("protein"),
                         carbs = obj.getInt("carbs"),
-                        fats = obj.getInt("fats")
+                        fats = obj.getInt("fats"),
+                        weight = obj.optInt("weight", 100) // ← обратная совместимость
                     )
                 )
             }
@@ -67,6 +68,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                         put("protein", entry.protein)
                         put("carbs", entry.carbs)
                         put("fats", entry.fats)
+                        put("weight", entry.weight)
                     }
                 )
             }
@@ -95,9 +97,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         dailyNorm = norm
         with(prefs.edit()) {
             putInt("norm_calories", norm["calories"]!!)
-            putInt("norm_protein", norm["protein"]!!)
-            putInt("norm_carbs", norm["carbs"]!!)
-            putInt("norm_fats", norm["fats"]!!)
+            putInt("protein".let { "norm_$it" }, norm["protein"]!!)
+            putInt("carbs".let { "norm_$it" }, norm["carbs"]!!)
+            putInt("fats".let { "norm_$it" }, norm["fats"]!!)
             apply()
         }
     }

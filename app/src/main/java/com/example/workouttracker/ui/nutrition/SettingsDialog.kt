@@ -16,9 +16,9 @@ fun SettingsDialog(
     onDismiss: () -> Unit
 ) {
     var calories by remember { mutableStateOf(currentNorm["calories"]?.toString() ?: "2500") }
-    var protein by remember { mutableStateOf(currentNorm["protein"]?.toString() ?: "120") }
-    var carbs by remember { mutableStateOf(currentNorm["carbs"]?.toString() ?: "300") }
-    var fats by remember { mutableStateOf(currentNorm["fats"]?.toString() ?: "80") }
+    var protein  by remember { mutableStateOf(currentNorm["protein"] ?.toString() ?: "120") }
+    var carbs    by remember { mutableStateOf(currentNorm["carbs"]   ?.toString() ?: "300") }
+    var fats     by remember { mutableStateOf(currentNorm["fats"]    ?.toString() ?: "80") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -27,30 +27,30 @@ fun SettingsDialog(
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
                     value = calories,
-                    onValueChange = { calories = it.filter { char -> char.isDigit() } },
-                    label = { Text("Калории") },
+                    onValueChange = { calories = it.filter { ch -> ch.isDigit() } },
+                    label = { Text("Калории (ккал)") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth()
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         value = protein,
-                        onValueChange = { protein = it.filter { char -> char.isDigit() } },
-                        label = { Text("Белки") },
+                        onValueChange = { protein = it.filter { ch -> ch.isDigit() } },
+                        label = { Text("Белки (г)") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.weight(1f)
                     )
                     OutlinedTextField(
                         value = carbs,
-                        onValueChange = { carbs = it.filter { char -> char.isDigit() } },
-                        label = { Text("Углеводы") },
+                        onValueChange = { carbs = it.filter { ch -> ch.isDigit() } },
+                        label = { Text("Углеводы (г)") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.weight(1f)
                     )
                     OutlinedTextField(
                         value = fats,
-                        onValueChange = { fats = it.filter { char -> char.isDigit() } },
-                        label = { Text("Жиры") },
+                        onValueChange = { fats = it.filter { ch -> ch.isDigit() } },
+                        label = { Text("Жиры (г)") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.weight(1f)
                     )
@@ -60,12 +60,14 @@ fun SettingsDialog(
         confirmButton = {
             TextButton(
                 onClick = {
-                    onSave(mapOf(
-                        "calories" to (calories.toIntOrNull() ?: 2500),
-                        "protein" to (protein.toIntOrNull() ?: 120),
-                        "carbs" to (carbs.toIntOrNull() ?: 300),
-                        "fats" to (fats.toIntOrNull() ?: 80)
-                    ))
+                    onSave(
+                        mapOf(
+                            "calories" to (calories.toIntOrNull() ?: 2500),
+                            "protein"  to (protein.toIntOrNull() ?: 120),
+                            "carbs"    to (carbs.toIntOrNull() ?: 300),
+                            "fats"     to (fats.toIntOrNull() ?: 80)
+                        )
+                    )
                 },
                 enabled = calories.isNotBlank()
             ) { Text("Сохранить") }
