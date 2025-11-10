@@ -9,7 +9,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CalendarToday
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -19,12 +22,15 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Date
+import java.util.Locale
+import java.util.UUID
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddTrainingDialog(
     session: TrainingSession? = null,
+    availableExercises: List<ExerciseCatalogItem> = emptyList(),
     onSave: (TrainingSession) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -34,16 +40,10 @@ fun AddTrainingDialog(
     var showDatePicker by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
-    val allExercises = listOf(
-        "Жим штанги лежа", "Присед", "Становая тяга", "Тяга верхнего блока",
-        "Подтягивания", "Отжимания", "Жим гантелей", "Выпады"
-    )
-
-    // Копируем с id!
-    var exercises by remember(session) {
-        mutableStateOf(
-            session?.exercises?.map { it.copy() }?.toMutableList() ?: mutableStateListOf<ExerciseEntry>()
-        )
+    val exercises = remember(session) {
+        mutableStateListOf<ExerciseEntry>().also { list ->
+            session?.exercises?.forEach { list.add(it.copy()) }
+        }
     }
 
     var showExercisePicker by remember { mutableStateOf(false) }
@@ -85,11 +85,13 @@ fun AddTrainingDialog(
                 item {
                     OutlinedButton(
                         onClick = { showExercisePicker = true },
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
                     ) {
                         Icon(Icons.Default.Add, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
-                        Text("Добавить упражнение")
+                        Text("Добавить упражнение", maxLines = 1, softWrap = false)
                     }
                 }
 
@@ -144,21 +146,31 @@ fun AddTrainingDialog(
                                     ) {
                                         OutlinedTextField(
                                             value = editSets,
-                                            onValueChange = { editSets = it.filter { char -> char.isDigit() } },
+                                            onValueChange = { editSets = it.filter { ch -> ch.isDigit() } },
                                             label = { Text("Подх.") },
                                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                             modifier = Modifier.weight(1f)
                                         )
                                         OutlinedTextField(
                                             value = editReps,
-                                            onValueChange = { editReps = it.filter { char -> char.isDigit() } },
+                                            onValueChange = { editReps = it.filter { ch -> ch.isDigit() } },
                                             label = { Text("Повт.") },
                                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                             modifier = Modifier.weight(1f)
                                         )
                                         OutlinedTextField(
                                             value = editWeight,
-                                            onValueChange = { editWeight = it.filter { char -> char.isDigit() || char == '.' } },
+                                            onValueChange = { raw ->
+                                                val normalized = raw.replace(',', '.')
+                                                val cleaned = buildString {
+                                                    var dotSeen = false
+                                                    for (c in normalized) {
+                                                        if (c.isDigit()) append(c)
+                                                        else if (c == '.' && !dotSeen) { append('.'); dotSeen = true }
+                                                    }
+                                                }
+                                                editWeight = cleaned
+                                            },
                                             label = { Text("Вес") },
                                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                             modifier = Modifier.weight(1f)
@@ -168,24 +180,26 @@ fun AddTrainingDialog(
                                         horizontalArrangement = Arrangement.End,
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        TextButton(onClick = { editingNewExerciseId = null }) {
-                                            Text("Отмена")
-                                        }
-                                        TextButton(onClick = {
-                                            val updated = exercise.copy(
-                                                name = editName,
-                                                sets = editSets.toIntOrNull() ?: 1,
-                                                reps = editReps.toIntOrNull() ?: 1,
-                                                weight = editWeight.toFloatOrNull() ?: 0f
-                                            )
-                                            val index = exercises.indexOf(exercise)
-                                            if (index != -1) {
-                                                exercises[index] = updated
-                                            }
-                                            editingNewExerciseId = null
-                                        }) {
-                                            Text("Сохранить")
-                                        }
+                                        TextButton(
+                                            onClick = { editingNewExerciseId = null },
+                                            modifier = Modifier.height(40.dp)
+                                        ) { Text("Отмена", maxLines = 1, softWrap = false) }
+                                        TextButton(
+                                            onClick = {
+                                                val updated = exercise.copy(
+                                                    name = editName,
+                                                    sets = editSets.toIntOrNull() ?: 1,
+                                                    reps = editReps.toIntOrNull() ?: 1,
+                                                    weight = editWeight.toFloatOrNull() ?: 0f
+                                                )
+                                                val index = exercises.indexOf(exercise)
+                                                if (index != -1) {
+                                                    exercises[index] = updated
+                                                }
+                                                editingNewExerciseId = null
+                                            },
+                                            modifier = Modifier.height(40.dp)
+                                        ) { Text("Сохранить", maxLines = 1, softWrap = false) }
                                     }
                                 }
                             }
@@ -205,13 +219,9 @@ fun AddTrainingDialog(
                     onSave(newSession)
                 },
                 enabled = exercises.isNotEmpty()
-            ) {
-                Text("Готово")
-            }
+            ) { Text("Готово") }
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Отмена") }
-        }
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
     )
 
     // DatePicker
@@ -227,10 +237,11 @@ fun AddTrainingDialog(
         ).show()
     }
 
-    // Добавление упражнения
+    // Диалог выбора/создания упражнения
     if (showExercisePicker) {
         var search by remember { mutableStateOf("") }
-        val filtered = allExercises.filter { it.contains(search, ignoreCase = true) }
+        val names = availableExercises.map { it.name }.distinct().sorted()
+        val filtered = names.filter { it.contains(search, ignoreCase = true) }
 
         AlertDialog(
             onDismissRequest = { showExercisePicker = false },
@@ -244,22 +255,42 @@ fun AddTrainingDialog(
                         modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(Modifier.height(8.dp))
+
+                    if (search.isNotBlank() && filtered.isEmpty()) {
+                        TextButton(
+                            onClick = {
+                                val name = search.trim()
+                                val newExercise = ExerciseEntry(name = name, sets = 3, reps = 10, weight = 0f)
+                                exercises.add(newExercise)
+                                showExercisePicker = false
+                                val last = (exercises.size - 1).coerceAtLeast(0)
+                                coroutineScope.launch { listState.animateScrollToItem(last) }
+                                editingNewExerciseId = newExercise.id
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(40.dp)
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Создать \"$search\"", maxLines = 1, softWrap = false)
+                        }
+                        Spacer(Modifier.height(8.dp))
+                    }
+
                     LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
                         items(filtered) { name ->
                             ListItem(
-                                headlineContent = { Text(name) },
+                                headlineContent = { Text(name, maxLines = 1) },
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable {
-                                        val newExercise = ExerciseEntry(name = name, sets = 0, reps = 0, weight = 0f)
+                                        val newExercise = ExerciseEntry(name = name, sets = 3, reps = 10, weight = 0f)
                                         exercises.add(newExercise)
                                         showExercisePicker = false
-
-                                        coroutineScope.launch {
-                                            val index = exercises.indexOf(newExercise)
-                                            listState.animateScrollToItem(index + 2)
-                                            editingNewExerciseId = newExercise.id
-                                        }
+                                        val last = (exercises.size - 1).coerceAtLeast(0)
+                                        coroutineScope.launch { listState.animateScrollToItem(last) }
+                                        editingNewExerciseId = newExercise.id
                                     }
                             )
                         }
@@ -267,15 +298,10 @@ fun AddTrainingDialog(
                 }
             },
             confirmButton = {},
-            dismissButton = {
-                TextButton(onClick = { showExercisePicker = false }) {
-                    Text("Отмена")
-                }
-            }
+            dismissButton = { TextButton(onClick = { showExercisePicker = false }) { Text("Отмена") } }
         )
     }
 }
 
-fun formatDateForDisplay(date: String): String {
-    return date.replace(Regex("(\\d{4})-(\\d{2})-(\\d{2})"), "$3.$2.$1")
-}
+fun formatDateForDisplay(date: String): String =
+    date.replace(Regex("(\\d{4})-(\\d{2})-(\\d{2})"), "$3.$2.$1")
