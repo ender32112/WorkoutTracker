@@ -18,3 +18,10 @@ data class TrainingSession(
     val totalVolume: Int
         get() = exercises.sumOf { it.sets * it.reps * it.weight.toInt() }
 }
+
+/** Каталог упражнений (для выбора и фоток тренажёров) */
+data class ExerciseCatalogItem(
+    val id: UUID = UUID.randomUUID(),
+    val name: String,
+    val photoUri: String? = null // content://... или file://
+)
