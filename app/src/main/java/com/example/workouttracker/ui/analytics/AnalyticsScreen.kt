@@ -1,6 +1,7 @@
 package com.example.workouttracker.ui.analytics
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.SharedPreferences
 import android.hardware.Sensor
@@ -28,6 +29,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.workouttracker.R
+import com.example.workouttracker.ui.components.SectionHeader
 import com.example.workouttracker.ui.nutrition.NutritionEntry
 import com.example.workouttracker.ui.training.ExerciseEntry
 import com.example.workouttracker.viewmodel.NutritionViewModel
@@ -51,9 +53,8 @@ data class WeatherDesc(val description: String)
 
 interface WeatherApi {
     @GET("weather")
-    suspend fun getCurrentWeather(
-        @Query("lat") lat: Double,
-        @Query("lon") lon: Double,
+    suspend fun getCurrentWeatherByCity(
+        @Query("q") city: String,
         @Query("appid") apiKey: String,
         @Query("units") units: String = "metric",
         @Query("lang") lang: String = "ru"
@@ -70,7 +71,17 @@ fun AnalyticsScreen(
     val scope = rememberCoroutineScope()
     val prefs: SharedPreferences = context.getSharedPreferences("analytics_prefs", Context.MODE_PRIVATE)
 
-    // permission state
+    // ===== Pref keys
+    val K_DAY_KEY = "steps_day_key"
+    val K_COUNTER_BASELINE = "steps_counter_base"
+    val K_COUNTER_LAST_SEEN = "steps_counter_last"
+    val K_STEPS_TODAY = "steps_today"
+    val K_WEATHER_JSON = "weather_cache_json"
+    val K_WEATHER_TIME = "weather_cache_time"
+    val K_CITY = "weather_city"
+    val K_STEP_GOAL = "step_goal"
+
+    // ===== Permission for steps
     var hasStepPermission by remember {
         mutableStateOf(
             androidx.core.content.ContextCompat.checkSelfPermission(
@@ -83,90 +94,121 @@ fun AnalyticsScreen(
     ) { granted: Boolean ->
         hasStepPermission = granted
         prefs.edit().putBoolean("step_permission", granted).apply()
-        // explicitly return Unit to avoid nullable Unit inference
         Unit
     }
 
-    // --- STEPS ---
-    var stepsToday by remember { mutableStateOf(prefs.getLong("steps_today", 0L)) }
+    fun todayKey(): String = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+
+    // ===== Step goal
+    var stepGoal by remember { mutableStateOf(prefs.getInt(K_STEP_GOAL, 8000)) }
+
+    // ===== STEPS (TYPE_STEP_COUNTER)
+    var stepsToday by remember { mutableStateOf(prefs.getLong(K_STEPS_TODAY, 0L)) }
     val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     val stepSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
 
     val stepListener = remember(prefs) {
         object : SensorEventListener {
-            private var initialStepsCache: Long
-                get() = prefs.getLong("initial_steps", -1L)
-                set(value) {
-                    prefs.edit().putLong("initial_steps", value).apply()
-                }
-
             override fun onSensorChanged(event: SensorEvent) {
-                if (event.sensor.type == Sensor.TYPE_STEP_COUNTER) {
-                    val currentSteps = event.values[0].toLong()
-                    val todayKey = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-                    val lastSavedDay = prefs.getString("initial_steps_day", null)
+                if (event.sensor.type != Sensor.TYPE_STEP_COUNTER) return
+                val currentCounter = event.values[0].toLong()
+                val today = todayKey()
+                val savedDay = prefs.getString(K_DAY_KEY, null)
+                val lastSeenCounter = prefs.getLong(K_COUNTER_LAST_SEEN, -1L)
+                var base = prefs.getLong(K_COUNTER_BASELINE, -1L)
 
-                    if (lastSavedDay == null || lastSavedDay != todayKey) {
-                        initialStepsCache = currentSteps
-                        prefs.edit().putString("initial_steps_day", todayKey).apply()
-                    }
-
-                    if (initialStepsCache == -1L) {
-                        initialStepsCache = currentSteps
-                    }
-
-                    val calculated = (currentSteps - initialStepsCache).coerceAtLeast(0L)
-                    stepsToday = calculated
-                    prefs.edit().putLong("steps_today", stepsToday).apply()
+                if (savedDay == null || savedDay != today) {
+                    val newBase = if (lastSeenCounter >= 0L) lastSeenCounter else currentCounter
+                    prefs.edit().putString(K_DAY_KEY, today).putLong(K_COUNTER_BASELINE, newBase).apply()
+                    base = newBase
                 }
-            }
 
-            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
-                // no-op
+                if (base < 0L) {
+                    prefs.edit().putLong(K_COUNTER_BASELINE, currentCounter).apply()
+                    stepsToday = 0L
+                } else {
+                    val calc = (currentCounter - base).coerceAtLeast(0L)
+                    stepsToday = calc
+                    prefs.edit().putLong(K_STEPS_TODAY, calc).apply()
+                }
+                prefs.edit().putLong(K_COUNTER_LAST_SEEN, currentCounter).apply()
             }
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
         }
     }
 
     LaunchedEffect(hasStepPermission, stepSensor) {
         if (hasStepPermission && stepSensor != null) {
-            sensorManager.registerListener(stepListener, stepSensor, SensorManager.SENSOR_DELAY_UI)
+            sensorManager.registerListener(stepListener, stepSensor, SensorManager.SENSOR_DELAY_NORMAL)
         }
     }
-
     DisposableEffect(Unit) {
-        onDispose {
-            // unregister listener — explicit Unit
-            sensorManager.unregisterListener(stepListener)
-            Unit
-        }
+        onDispose { sensorManager.unregisterListener(stepListener); Unit }
     }
 
-    // === WEATHER ===
+    // ===== WEATHER with cache + city
+    var city by remember { mutableStateOf(prefs.getString(K_CITY, "Москва") ?: "Москва") }
     var weather by remember { mutableStateOf("Загрузка...") }
-    LaunchedEffect(Unit) {
-        scope.launch {
-            try {
-                val apiKey = context.getString(R.string.openweather_api_key)
-                if (apiKey.isBlank()) {
-                    weather = "API key не настроен"
-                    return@launch
-                }
-                val retrofit = Retrofit.Builder()
-                    .baseUrl("https://api.openweathermap.org/data/2.5/")
-                    .addConverterFactory(GsonConverterFactory.create())
-                    .build()
-                val api = retrofit.create(WeatherApi::class.java)
-                val response = api.getCurrentWeather(47.2357, 39.7122, apiKey)
-                val temp = response.main.temp.roundToInt()
-                val desc = response.weather.getOrNull(0)?.description?.replaceFirstChar { it.uppercase() } ?: "-"
-                weather = "$desc, $temp°C"
-            } catch (e: Exception) {
-                weather = "Нет сети / ошибка"
+    var weatherSubtitle by remember { mutableStateOf<String?>(null) }
+
+    fun setWeatherFromCache(): Boolean {
+        val cached = prefs.getString(K_WEATHER_JSON, null) ?: return false
+        val time = prefs.getLong(K_WEATHER_TIME, 0L)
+        return try {
+            val obj = JSONObject(cached)
+            val temp = obj.getDouble("temp").roundToInt()
+            val desc = obj.getString("desc")
+            val ts = if (time > 0) SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(time)) else "-"
+            weather = "$desc, $temp°C"
+            weatherSubtitle = "Обновлено $ts"
+            true
+        } catch (_: Exception) { false }
+    }
+
+    suspend fun fetchAndCacheWeather(currentCity: String) {
+        try {
+            val apiKey = context.getString(R.string.openweather_api_key)
+            if (apiKey.isBlank()) {
+                weather = "API key не настроен"
+                weatherSubtitle = null
+                return
+            }
+            val retrofit = Retrofit.Builder()
+                .baseUrl("https://api.openweathermap.org/data/2.5/")
+                .addConverterFactory(GsonConverterFactory.create())
+                .build()
+            val api = retrofit.create(WeatherApi::class.java)
+
+            val response = api.getCurrentWeatherByCity(currentCity, apiKey)
+            val temp = response.main.temp.roundToInt()
+            val desc = response.weather.getOrNull(0)?.description?.replaceFirstChar { it.uppercase() } ?: "-"
+
+            weather = "$desc, $temp°C"
+            weatherSubtitle = "Обновлено " + SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+
+            val cached = JSONObject().apply {
+                put("temp", response.main.temp)
+                put("desc", desc)
+            }.toString()
+            prefs.edit()
+                .putString(K_WEATHER_JSON, cached)
+                .putLong(K_WEATHER_TIME, System.currentTimeMillis())
+                .apply()
+        } catch (_: Exception) {
+            if (!setWeatherFromCache()) {
+                weather = "Нет сети / нет кэша"
+                weatherSubtitle = null
             }
         }
     }
 
-    // === NUTRITION ===
+    LaunchedEffect(city) {
+        val hadCache = setWeatherFromCache()
+        if (!hadCache) weather = "Загрузка..."
+        scope.launch { fetchAndCacheWeather(city) }
+    }
+
+    // ===== NUTRITION today
     val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
     val todayEntries by nutritionViewModel.entries.collectAsState()
     val todayNutrition = todayEntries.filter { it.date == today }
@@ -178,7 +220,8 @@ fun AnalyticsScreen(
             calories = 0,
             protein = 0,
             carbs = 0,
-            fats = 0
+            fats = 0,
+            weight = 0
         )
     ) { acc, e ->
         acc.copy(
@@ -189,8 +232,9 @@ fun AnalyticsScreen(
         )
     }
 
-    // === WEIGHT HISTORY ===
+    // ===== WEIGHT HISTORY + validation + editing
     var weightInput by remember { mutableStateOf("") }
+    var weightError by remember { mutableStateOf<String?>(null) }
 
     fun loadWeightHistory(): List<Pair<String, Float>> {
         val json = prefs.getString("weight_history", "[]") ?: "[]"
@@ -202,23 +246,28 @@ fun AnalyticsScreen(
                 list.add(obj.getString("date") to obj.getDouble("weight").toFloat())
             }
             list
-        } catch (e: Exception) {
-            emptyList()
-        }
+        } catch (_: Exception) { emptyList() }
     }
-
     var weightHistory by remember { mutableStateOf(loadWeightHistory()) }
 
+    fun validateWeight(text: String): String? {
+        if (text.isBlank()) return "Введите вес"
+        val normalized = text.replace(',', '.')
+        val value = normalized.toFloatOrNull() ?: return "Неверный формат (пример: 72.4)"
+        if (value < 30f || value > 300f) return "Диапазон 30–300 кг"
+        return null
+    }
+
     val onSaveWeight = {
-        weightInput.toFloatOrNull()?.let { w ->
+        val err = validateWeight(weightInput)
+        weightError = err
+        if (err == null) {
+            val value = weightInput.replace(',', '.').toFloat()
             val date = SimpleDateFormat("dd.MM", Locale.getDefault()).format(Date())
-            val newHistory = (weightHistory + (date to w)).takeLast(30)
+            val newHistory = (weightHistory + (date to value)).takeLast(30)
             val array = JSONArray()
-            newHistory.forEach { (d, weight) ->
-                array.put(JSONObject().apply {
-                    put("date", d)
-                    put("weight", weight)
-                })
+            newHistory.forEach { (d, w) ->
+                array.put(JSONObject().apply { put("date", d); put("weight", w) })
             }
             prefs.edit().putString("weight_history", array.toString()).apply()
             weightHistory = newHistory
@@ -227,58 +276,119 @@ fun AnalyticsScreen(
         Unit
     }
 
-    // === BEST EXERCISES ===
+    // ===== BEST EXERCISES
     val sessions by trainingViewModel.sessions.collectAsState()
     val bestExercises = sessions
         .flatMap { it.exercises }
         .groupBy { it.name }
-        .mapValues { (_, exercises) ->
-            exercises.maxByOrNull { it.weight * it.reps } ?: exercises.first()
-        }
+        .mapValues { (_, exercises) -> exercises.maxByOrNull { it.weight * it.reps } ?: exercises.first() }
         .values
         .sortedByDescending { it.weight * it.reps }
         .take(5)
 
-    // === UI ===
-    LazyColumn(
-        modifier = Modifier.padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        item {
-            StepsCard(
-                steps = stepsToday,
-                hasPermission = hasStepPermission,
-                onRequest = { permissionLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION) }
+    // ===== Settings + Weight editor dialogs
+    var showSettings by remember { mutableStateOf(false) }
+    var showWeightEditor by remember { mutableStateOf(false) }
+
+    // ===== UI =====
+    Scaffold(
+        topBar = {
+            SectionHeader(
+                title = "Аналитика",
+                titleStyle = MaterialTheme.typography.headlineSmall,
+                actions = {
+                    IconButton(onClick = { showSettings = true }) {
+                        Icon(Icons.Default.Tune, contentDescription = "Настройки аналитики")
+                    }
+                }
             )
         }
-        item { WeatherCard(weather = weather) }
-        item { NutritionTodayCard(total = total, norm = nutritionViewModel.dailyNorm) }
-        item {
-            WeightInputCard(
-                input = weightInput,
-                onInputChange = { weightInput = it },
-                onSave = onSaveWeight,
-                history = weightHistory
-            )
+    ) { innerPadding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            item {
+                StepsCard(
+                    steps = stepsToday,
+                    goal = stepGoal,
+                    hasPermission = hasStepPermission,
+                    onRequest = { permissionLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION) }
+                )
+            }
+            item { WeatherCard(weather = weather, subtitle = weatherSubtitle, city = city) }
+            item { NutritionTodayCard(total = total, norm = nutritionViewModel.dailyNorm) }
+            item {
+                WeightInputCard(
+                    input = weightInput,
+                    error = weightError,
+                    onInputChange = { text ->
+                        weightInput = text.filter { it.isDigit() || it == '.' || it == ',' }
+                        weightError = null
+                    },
+                    onSave = onSaveWeight,
+                    history = weightHistory,
+                    onEditClick = { showWeightEditor = true }
+                )
+            }
+            item { BestExercisesCard(exercises = bestExercises) }
         }
-        item { BestExercisesCard(exercises = bestExercises) }
+    }
+
+    if (showSettings) {
+        AnalyticsSettingsDialog(
+            currentCity = city,
+            currentGoal = stepGoal.toString(),
+            onSave = { newCity, newGoal ->
+                val cityTrim = newCity.trim().ifBlank { "Москва" }
+                val goalInt = newGoal.toIntOrNull()?.coerceIn(1000, 50000) ?: 8000
+                prefs.edit().putString(K_CITY, cityTrim).putInt(K_STEP_GOAL, goalInt).apply()
+                city = cityTrim
+                stepGoal = goalInt
+                scope.launch { fetchAndCacheWeather(cityTrim) }
+                showSettings = false
+            },
+            onRefreshWeather = { scope.launch { fetchAndCacheWeather(city) } },
+            onDismiss = { showSettings = false }
+        )
+    }
+
+    if (showWeightEditor) {
+        EditWeightHistoryDialog(
+            initial = weightHistory,
+            onSave = { updated ->
+                val array = JSONArray()
+                updated.forEach { (d, w) ->
+                    array.put(JSONObject().apply { put("date", d); put("weight", w) })
+                }
+                prefs.edit().putString("weight_history", array.toString()).apply()
+                weightHistory = updated
+                showWeightEditor = false
+            },
+            onDismiss = { showWeightEditor = false }
+        )
     }
 }
 
 // ===== components =====
 
 @Composable
-fun StepsCard(steps: Long, hasPermission: Boolean, onRequest: () -> Unit) {
+fun StepsCard(steps: Long, goal: Int, hasPermission: Boolean, onRequest: () -> Unit) {
+    val progress = (steps.toFloat() / goal.coerceAtLeast(1)).coerceIn(0f, 1f)
     Card(modifier = Modifier.fillMaxWidth()) {
         Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Default.DirectionsWalk, contentDescription = null)
             Spacer(Modifier.width(12.dp))
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text("Шаги сегодня", style = MaterialTheme.typography.titleMedium)
-                Text("$steps", style = MaterialTheme.typography.headlineMedium)
+                Text("$steps / $goal", style = MaterialTheme.typography.headlineSmall)
+                LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
             }
-            Spacer(Modifier.weight(1f))
             if (!hasPermission) {
+                Spacer(Modifier.width(12.dp))
                 TextButton(onClick = onRequest) { Text("Разрешить") }
             }
         }
@@ -286,14 +396,17 @@ fun StepsCard(steps: Long, hasPermission: Boolean, onRequest: () -> Unit) {
 }
 
 @Composable
-fun WeatherCard(weather: String) {
+fun WeatherCard(weather: String, subtitle: String?, city: String) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Default.WbSunny, contentDescription = null)
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text("Погода", style = MaterialTheme.typography.titleMedium)
-                Text(weather, style = MaterialTheme.typography.bodyMedium)
+                Text("Погода • $city", style = MaterialTheme.typography.titleMedium)
+                Text(weather, style = MaterialTheme.typography.bodyMedium) // ← фикс опечатки
+                if (subtitle != null) {
+                    Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         }
     }
@@ -307,9 +420,9 @@ fun NutritionTodayCard(total: NutritionEntry, norm: Map<String, Int>) {
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.SpaceEvenly, modifier = Modifier.fillMaxWidth()) {
                 RingMacro("Кал", total.calories, norm["calories"] ?: 2000, Color.Red)
-                RingMacro("Б", total.protein, norm["protein"] ?: 100, Color.Green)
-                RingMacro("Ж", total.fats, norm["fats"] ?: 70, Color.Yellow)
-                RingMacro("У", total.carbs, norm["carbs"] ?: 250, Color.Blue)
+                RingMacro("Б", total.protein, norm["protein"] ?: 100, Color(0xFF2E7D32))
+                RingMacro("Ж", total.fats, norm["fats"] ?: 70, Color(0xFFF9A825))
+                RingMacro("У", total.carbs, norm["carbs"] ?: 250, Color(0xFF1565C0))
             }
         }
     }
@@ -343,30 +456,47 @@ fun RingMacro(label: String, value: Int, norm: Int, color: Color) {
 }
 
 @Composable
-fun WeightInputCard(input: String, onInputChange: (String) -> Unit, onSave: () -> Unit, history: List<Pair<String, Float>>) {
+fun WeightInputCard(
+    input: String,
+    error: String?,
+    onInputChange: (String) -> Unit,
+    onSave: () -> Unit,
+    history: List<Pair<String, Float>>,
+    onEditClick: () -> Unit
+) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("Вес тела", style = MaterialTheme.typography.titleMedium)
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Text("Вес тела", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = onEditClick) { Text("Редактировать") }
+            }
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(
                     value = input,
                     onValueChange = onInputChange,
                     label = { Text("кг") },
-                    modifier = Modifier.weight(1f)
+                    isError = error != null,
+                    supportingText = { if (error != null) Text(error, color = MaterialTheme.colorScheme.error) },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true
                 )
                 Spacer(Modifier.width(8.dp))
-                Button(onClick = onSave) { Text("Сохранить") }
+                Button(onClick = onSave, enabled = input.isNotBlank()) { Text("Сохранить") }
             }
             if (history.isNotEmpty()) {
                 Spacer(Modifier.height(12.dp))
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Box(modifier = Modifier.size(12.dp).background(MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(2.dp)))
+                    Box(
+                        modifier = Modifier
+                            .size(12.dp)
+                            .background(MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(2.dp))
+                    )
                     Spacer(Modifier.width(8.dp))
                     Text("Вес, кг", style = MaterialTheme.typography.bodySmall)
                 }
                 Spacer(Modifier.height(8.dp))
-                // chart with labels at left (composables, not nativeCanvas)
                 WeightChartWithAxes(history)
                 Spacer(Modifier.height(8.dp))
                 Row(modifier = Modifier.fillMaxWidth()) {
@@ -379,13 +509,156 @@ fun WeightInputCard(input: String, onInputChange: (String) -> Unit, onSave: () -
     }
 }
 
+/** Настройки: цель по шагам, город, обновление погоды. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AnalyticsSettingsDialog(
+    currentCity: String,
+    currentGoal: String,
+    onSave: (newCity: String, newGoal: String) -> Unit,
+    onRefreshWeather: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var city by remember { mutableStateOf(currentCity) }
+    var goal by remember { mutableStateOf(currentGoal) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.Tune, contentDescription = null) },
+        title = { Text("Настройки аналитики") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = goal,
+                    onValueChange = { goal = it.filter { ch -> ch.isDigit() } },
+                    label = { Text("Цель по шагам (шт.)") },
+                    singleLine = true,
+                    leadingIcon = { Icon(Icons.Default.Flag, contentDescription = null) }
+                )
+                OutlinedTextField(
+                    value = city,
+                    onValueChange = { city = it },
+                    label = { Text("Город для погоды") },
+                    singleLine = true,
+                    leadingIcon = { Icon(Icons.Default.LocationCity, contentDescription = null) }
+                )
+                OutlinedButton(onClick = onRefreshWeather) {
+                    Icon(Icons.Default.Refresh, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Обновить погоду сейчас")
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { onSave(city, goal) }) { Text("Сохранить") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
+    )
+}
+
+/** Редактор истории веса c устойчивыми ключами и удалением по id. */
+@SuppressLint("UnrememberedMutableState")
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EditWeightHistoryDialog(
+    initial: List<Pair<String, Float>>,
+    onSave: (List<Pair<String, Float>>) -> Unit,
+    onDismiss: () -> Unit
+) {
+    // State-holder для строки с устойчивым ключом
+    class RowItem(
+        val id: String = UUID.randomUUID().toString(),
+        date: String,
+        weight: String
+    ) {
+        var date by mutableStateOf(date)
+        var weight by mutableStateOf(weight)
+    }
+
+    // Локальный snapshotStateList — любые изменения полей RowItem перерисуют UI
+    val rows = remember {
+        mutableStateListOf<RowItem>().apply {
+            initial.forEach { add(RowItem(date = it.first.trim(), weight = it.second.toString())) }
+        }
+    }
+
+    val dateRegex = Regex("""\d{2}\.\d{2}""")
+    fun validateRow(date: String, weightStr: String): String? {
+        val d = date.trim()
+        if (!dateRegex.matches(d)) return "Дата в формате ДД.ММ"
+        val normalized = weightStr.trim().replace(',', '.')
+        val v = normalized.toFloatOrNull() ?: return "Формат веса (пример: 72.4)"
+        if (v < 30f || v > 300f) return "Диапазон 30–300"
+        return null
+    }
+
+    val canSave by derivedStateOf {
+        rows.all { validateRow(it.date, it.weight) == null }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.EditCalendar, contentDescription = null) },
+        title = { Text("Редактирование веса") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Измените дату и/или вес. Можно удалять строки.")
+                Spacer(Modifier.height(4.dp))
+
+                rows.forEach { item ->
+                    val err = validateRow(item.date, item.weight)
+
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        OutlinedTextField(
+                            value = item.date,
+                            onValueChange = { v ->
+                                item.date = v.filter { ch -> ch.isDigit() || ch == '.' }.take(5)
+                            },
+                            label = { Text("Дата (ДД.ММ)") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        OutlinedTextField(
+                            value = item.weight,
+                            onValueChange = { v ->
+                                item.weight = v.filter { ch -> ch.isDigit() || ch == '.' || ch == ',' }
+                            },
+                            label = { Text("Вес (кг)") },
+                            singleLine = true,
+                            isError = err != null,
+                            supportingText = { if (err != null) Text(err) },
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = { rows.removeAll { it.id == item.id } },
+                            colors = IconButtonDefaults.iconButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                        ) { Icon(Icons.Default.Delete, contentDescription = "Удалить") }
+                    }
+                }
+
+                if (rows.isEmpty()) {
+                    Text("Нет записей", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val result = rows.map { it.date.trim() to it.weight.trim().replace(',', '.').toFloat() }
+                    onSave(result)
+                },
+                enabled = canSave // теперь корректно считается и разблокируется
+            ) { Text("Сохранить") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
+    )
+}
+
+
 /**
- * Chart implementation WITHOUT nativeCanvas.
- * Left column shows Y labels (as Text composables), right column contains pure Canvas (axis, grid, line, points).
+ * Диаграмма без nativeCanvas — в Canvas не вызываем @Composable API.
  */
 @Composable
 fun WeightChartWithAxes(data: List<Pair<String, Float>>) {
-    // hoist theme-dependent values out of the Canvas lambda
     val primaryColor = MaterialTheme.colorScheme.primary
     val axisColor = Color.Gray
     val gridColor = Color.LightGray
@@ -406,7 +679,6 @@ fun WeightChartWithAxes(data: List<Pair<String, Float>>) {
             .fillMaxWidth()
             .height(180.dp)
     ) {
-        // left Y labels column (composables — allowed)
         Column(
             modifier = Modifier
                 .width(56.dp)
@@ -427,8 +699,10 @@ fun WeightChartWithAxes(data: List<Pair<String, Float>>) {
             }
         }
 
-        // right: canvas for axis/line/points — inside Canvas we DON'T call MaterialTheme.*
-        Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
+        Box(modifier = Modifier
+            .weight(1f)
+            .fillMaxHeight()
+        ) {
             val paddingPx = with(density) { paddingDp.toPx() }
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val width = size.width
@@ -440,18 +714,15 @@ fun WeightChartWithAxes(data: List<Pair<String, Float>>) {
                 val graphWidth = (width - paddingLeft - paddingRight).coerceAtLeast(1f)
                 val graphHeight = (height - paddingTop - paddingBottom).coerceAtLeast(1f)
 
-                // axes
                 drawLine(axisColor, Offset(paddingLeft, paddingTop), Offset(paddingLeft, height - paddingBottom), 2f)
                 drawLine(axisColor, Offset(paddingLeft, height - paddingBottom), Offset(width - paddingRight, height - paddingBottom), 2f)
 
-                // horizontal grid lines
                 for (i in 0..stepsY) {
                     val fy = i / stepsY.toFloat()
                     val y = paddingTop + graphHeight * (1f - fy)
                     drawLine(gridColor, Offset(paddingLeft, y), Offset(width - paddingRight, y), 1f)
                 }
 
-                // plot
                 if (data.isNotEmpty()) {
                     if (data.size == 1) {
                         val x = paddingLeft + graphWidth / 2f
@@ -464,9 +735,7 @@ fun WeightChartWithAxes(data: List<Pair<String, Float>>) {
                         data.forEachIndexed { i, (_, w) ->
                             val x = paddingLeft + i * stepX
                             val y = paddingTop + graphHeight * (1f - (w - displayMin) / range)
-                            if (i > 0) {
-                                drawLine(primaryColor, Offset(prevX, prevY), Offset(x, y), 3f)
-                            }
+                            if (i > 0) drawLine(primaryColor, Offset(prevX, prevY), Offset(x, y), 3f)
                             drawCircle(primaryColor, 4f, Offset(x, y))
                             prevX = x
                             prevY = y
@@ -477,7 +746,6 @@ fun WeightChartWithAxes(data: List<Pair<String, Float>>) {
         }
     }
 }
-
 
 @Composable
 fun BestExercisesCard(exercises: Collection<ExerciseEntry>) {
