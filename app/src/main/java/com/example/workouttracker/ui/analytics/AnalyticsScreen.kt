@@ -2,31 +2,54 @@ package com.example.workouttracker.ui.analytics
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.workouttracker.R
 import com.example.workouttracker.ui.components.SectionHeader
@@ -35,18 +58,19 @@ import com.example.workouttracker.ui.training.ExerciseEntry
 import com.example.workouttracker.viewmodel.NutritionViewModel
 import com.example.workouttracker.viewmodel.TrainingViewModel
 import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET
 import retrofit2.http.Query
-import org.json.JSONArray
-import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 
-// === Weather DTOs & API ===
+/* ===================== Weather DTO & API ===================== */
 data class WeatherResponse(val main: Main, val weather: List<WeatherDesc>)
 data class Main(val temp: Double)
 data class WeatherDesc(val description: String)
@@ -61,6 +85,12 @@ interface WeatherApi {
     ): WeatherResponse
 }
 
+/* ===================== Const ===================== */
+private const val WEATHER_TTL_MS = 30 * 60 * 1000L
+private const val NOTIF_CHANNEL_ID = "steps_goal_channel"
+private const val NOTIF_ID_GOAL = 1001
+
+/* ===================== Analytics Screen ===================== */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AnalyticsScreen(
@@ -71,7 +101,7 @@ fun AnalyticsScreen(
     val scope = rememberCoroutineScope()
     val prefs: SharedPreferences = context.getSharedPreferences("analytics_prefs", Context.MODE_PRIVATE)
 
-    // ===== Pref keys
+    // ---- Keys
     val K_DAY_KEY = "steps_day_key"
     val K_COUNTER_BASELINE = "steps_counter_base"
     val K_COUNTER_LAST_SEEN = "steps_counter_last"
@@ -80,58 +110,92 @@ fun AnalyticsScreen(
     val K_WEATHER_TIME = "weather_cache_time"
     val K_CITY = "weather_city"
     val K_STEP_GOAL = "step_goal"
+    val K_WEIGHT_JSON = "weight_history"
+    val K_NOTIFY_ENABLED = "notify_steps_enabled"
+    val K_GOAL_SENT_FOR_DAY = "goal_sent_day"
+    val K_BEST_EX_LIMIT = "best_ex_limit"
 
-    // ===== Permission for steps
+    fun todayKeyIso(): String = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+    fun todayPrettyShort(): String = SimpleDateFormat("dd.MM", Locale.getDefault()).format(Date())
+    fun timePretty(ts: Long): String = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(ts))
+
+    /* ---------- Permissions ---------- */
     var hasStepPermission by remember {
         mutableStateOf(
-            androidx.core.content.ContextCompat.checkSelfPermission(
+            ContextCompat.checkSelfPermission(
                 context, Manifest.permission.ACTIVITY_RECOGNITION
-            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) == PackageManager.PERMISSION_GRANTED
         )
     }
-    val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { granted: Boolean ->
+    val stepPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
         hasStepPermission = granted
         prefs.edit().putBoolean("step_permission", granted).apply()
-        Unit
     }
 
-    fun todayKey(): String = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+    var hasNotifPermission by remember {
+        mutableStateOf(
+            if (Build.VERSION.SDK_INT >= 33)
+                ContextCompat.checkSelfPermission(
+                    context, Manifest.permission.POST_NOTIFICATIONS
+                ) == PackageManager.PERMISSION_GRANTED
+            else true
+        )
+    }
+    val notifPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted -> hasNotifPermission = granted }
 
-    // ===== Step goal
-    var stepGoal by remember { mutableStateOf(prefs.getInt(K_STEP_GOAL, 8000)) }
+    /* ---------- Settings state ---------- */
+    var stepGoal by rememberSaveable { mutableStateOf(prefs.getInt(K_STEP_GOAL, 8000)) }
+    var city by rememberSaveable { mutableStateOf(prefs.getString(K_CITY, "Москва") ?: "Москва") }
+    var notifyStepsEnabled by rememberSaveable { mutableStateOf(prefs.getBoolean(K_NOTIFY_ENABLED, true)) }
+    var bestExercisesLimit by rememberSaveable { mutableStateOf(prefs.getInt(K_BEST_EX_LIMIT, 5).coerceIn(1, 10)) }
 
-    // ===== STEPS (TYPE_STEP_COUNTER)
+    /* ---------- Snackbar ---------- */
+    val snackbarHost = remember { SnackbarHostState() }
+    suspend fun showSnack(msg: String) { snackbarHost.showSnackbar(msg) }
+
+    /* ---------- Sensors: Steps ---------- */
     var stepsToday by remember { mutableStateOf(prefs.getLong(K_STEPS_TODAY, 0L)) }
-    val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
-    val stepSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
+    val sensorManager = remember { context.getSystemService(Context.SENSOR_SERVICE) as SensorManager }
+    val stepSensor = remember { sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER) }
 
     val stepListener = remember(prefs) {
         object : SensorEventListener {
             override fun onSensorChanged(event: SensorEvent) {
                 if (event.sensor.type != Sensor.TYPE_STEP_COUNTER) return
-                val currentCounter = event.values[0].toLong()
-                val today = todayKey()
+                val current = event.values[0].toLong()
+                val day = todayKeyIso()
                 val savedDay = prefs.getString(K_DAY_KEY, null)
-                val lastSeenCounter = prefs.getLong(K_COUNTER_LAST_SEEN, -1L)
+                val lastSeen = prefs.getLong(K_COUNTER_LAST_SEEN, -1L)
                 var base = prefs.getLong(K_COUNTER_BASELINE, -1L)
 
-                if (savedDay == null || savedDay != today) {
-                    val newBase = if (lastSeenCounter >= 0L) lastSeenCounter else currentCounter
-                    prefs.edit().putString(K_DAY_KEY, today).putLong(K_COUNTER_BASELINE, newBase).apply()
+                if (savedDay == null || savedDay != day) {
+                    val newBase = if (lastSeen >= 0L) lastSeen else current
+                    prefs.edit()
+                        .putString(K_DAY_KEY, day)
+                        .putLong(K_COUNTER_BASELINE, newBase)
+                        .apply()
                     base = newBase
+                    prefs.edit().putString(K_GOAL_SENT_FOR_DAY, null).apply()
+                }
+
+                if (lastSeen >= 0L && current < lastSeen) {
+                    prefs.edit().putLong(K_COUNTER_BASELINE, current).apply()
+                    base = current
                 }
 
                 if (base < 0L) {
-                    prefs.edit().putLong(K_COUNTER_BASELINE, currentCounter).apply()
+                    prefs.edit().putLong(K_COUNTER_BASELINE, current).apply()
                     stepsToday = 0L
                 } else {
-                    val calc = (currentCounter - base).coerceAtLeast(0L)
+                    val calc = (current - base).coerceAtLeast(0L)
                     stepsToday = calc
                     prefs.edit().putLong(K_STEPS_TODAY, calc).apply()
                 }
-                prefs.edit().putLong(K_COUNTER_LAST_SEEN, currentCounter).apply()
+                prefs.edit().putLong(K_COUNTER_LAST_SEEN, current).apply()
             }
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
         }
@@ -142,14 +206,63 @@ fun AnalyticsScreen(
             sensorManager.registerListener(stepListener, stepSensor, SensorManager.SENSOR_DELAY_NORMAL)
         }
     }
-    DisposableEffect(Unit) {
-        onDispose { sensorManager.unregisterListener(stepListener); Unit }
+    DisposableEffect(hasStepPermission, stepSensor) {
+        onDispose { sensorManager.unregisterListener(stepListener) }
     }
 
-    // ===== WEATHER with cache + city
-    var city by remember { mutableStateOf(prefs.getString(K_CITY, "Москва") ?: "Москва") }
+    /* ---------- Notifications ---------- */
+    fun ensureNotifChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val channel = NotificationChannel(
+                NOTIF_CHANNEL_ID,
+                "Достижение цели по шагам",
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply { description = "Уведомления при выполнении дневной цели шагов" }
+            nm.createNotificationChannel(channel)
+        }
+    }
+
+    fun sendGoalNotificationIfNeeded() {
+        if (!notifyStepsEnabled) return
+        if (!hasNotifPermission) return
+        val day = todayKeyIso()
+        val sentForDay = prefs.getString(K_GOAL_SENT_FOR_DAY, null)
+        if (sentForDay == day) return
+        if (stepsToday >= stepGoal) {
+            ensureNotifChannel()
+            val notif = NotificationCompat.Builder(context, NOTIF_CHANNEL_ID)
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setContentTitle("Цель достигнута 🎉")
+                .setContentText("Вы прошли $stepsToday шагов из $stepGoal. Отличная работа!")
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setAutoCancel(true)
+                .build()
+            NotificationManagerCompat.from(context).notify(NOTIF_ID_GOAL, notif)
+            prefs.edit().putString(K_GOAL_SENT_FOR_DAY, day).apply()
+        }
+    }
+
+    LaunchedEffect(notifyStepsEnabled) {
+        if (notifyStepsEnabled && Build.VERSION.SDK_INT >= 33 && !hasNotifPermission) {
+            notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+    LaunchedEffect(stepsToday, stepGoal, notifyStepsEnabled, hasNotifPermission) {
+        sendGoalNotificationIfNeeded()
+    }
+
+    /* ---------- Weather with cache ---------- */
     var weather by remember { mutableStateOf("Загрузка...") }
     var weatherSubtitle by remember { mutableStateOf<String?>(null) }
+
+    val retrofit = remember {
+        Retrofit.Builder()
+            .baseUrl("https://api.openweathermap.org/data/2.5/")
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+    }
+    val api = remember { retrofit.create(WeatherApi::class.java) }
 
     fun setWeatherFromCache(): Boolean {
         val cached = prefs.getString(K_WEATHER_JSON, null) ?: return false
@@ -158,13 +271,16 @@ fun AnalyticsScreen(
             val obj = JSONObject(cached)
             val temp = obj.getDouble("temp").roundToInt()
             val desc = obj.getString("desc")
-            val ts = if (time > 0) SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(time)) else "-"
+            val ts = if (time > 0) timePretty(time) else "-"
             weather = "$desc, $temp°C"
             weatherSubtitle = "Обновлено $ts"
             true
         } catch (_: Exception) { false }
     }
-
+    fun cacheIsFresh(): Boolean {
+        val t = prefs.getLong(K_WEATHER_TIME, 0L)
+        return t > 0 && (System.currentTimeMillis() - t) < WEATHER_TTL_MS
+    }
     suspend fun fetchAndCacheWeather(currentCity: String) {
         try {
             val apiKey = context.getString(R.string.openweather_api_key)
@@ -173,18 +289,12 @@ fun AnalyticsScreen(
                 weatherSubtitle = null
                 return
             }
-            val retrofit = Retrofit.Builder()
-                .baseUrl("https://api.openweathermap.org/data/2.5/")
-                .addConverterFactory(GsonConverterFactory.create())
-                .build()
-            val api = retrofit.create(WeatherApi::class.java)
-
             val response = api.getCurrentWeatherByCity(currentCity, apiKey)
             val temp = response.main.temp.roundToInt()
             val desc = response.weather.getOrNull(0)?.description?.replaceFirstChar { it.uppercase() } ?: "-"
 
             weather = "$desc, $temp°C"
-            weatherSubtitle = "Обновлено " + SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+            weatherSubtitle = "Обновлено " + timePretty(System.currentTimeMillis())
 
             val cached = JSONObject().apply {
                 put("temp", response.main.temp)
@@ -198,58 +308,77 @@ fun AnalyticsScreen(
             if (!setWeatherFromCache()) {
                 weather = "Нет сети / нет кэша"
                 weatherSubtitle = null
+            } else {
+                scope.launch { showSnack("Показаны последние сохранённые данные погоды") }
             }
         }
     }
-
     LaunchedEffect(city) {
         val hadCache = setWeatherFromCache()
         if (!hadCache) weather = "Загрузка..."
-        scope.launch { fetchAndCacheWeather(city) }
+        if (!cacheIsFresh()) scope.launch { fetchAndCacheWeather(city) }
     }
 
-    // ===== NUTRITION today
-    val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-    val todayEntries by nutritionViewModel.entries.collectAsState()
-    val todayNutrition = todayEntries.filter { it.date == today }
-    val total = todayNutrition.fold(
+    /* ---------- Nutrition Today ---------- */
+    val todayIso = todayKeyIso()
+    val entries by nutritionViewModel.entries.collectAsState()
+    val todayNutrition = entries.filter { it.date == todayIso || it.date == SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()) }
+    val todayTotal = todayNutrition.fold(
         NutritionEntry(
             id = UUID.randomUUID(),
-            date = today,
+            date = todayIso,
             name = "",
-            calories = 0,
-            protein = 0,
-            carbs = 0,
-            fats = 0,
-            weight = 0
+            calories = 0, protein = 0, carbs = 0, fats = 0, weight = 0
         )
     ) { acc, e ->
         acc.copy(
             calories = acc.calories + e.calories,
             protein = acc.protein + e.protein,
             carbs = acc.carbs + e.carbs,
-            fats = acc.fats + e.fats
+            fats = acc.fats + e.fats,
+            weight = acc.weight + e.weight
         )
     }
 
-    // ===== WEIGHT HISTORY + validation + editing
-    var weightInput by remember { mutableStateOf("") }
-    var weightError by remember { mutableStateOf<String?>(null) }
-
+    /* ---------- Weight history ---------- */
     fun loadWeightHistory(): List<Pair<String, Float>> {
-        val json = prefs.getString("weight_history", "[]") ?: "[]"
+        val json = prefs.getString(K_WEIGHT_JSON, "[]") ?: "[]"
         return try {
             val list = mutableListOf<Pair<String, Float>>()
-            val array = JSONArray(json)
-            for (i in 0 until array.length()) {
-                val obj = array.getJSONObject(i)
-                list.add(obj.getString("date") to obj.getDouble("weight").toFloat())
+            val arr = JSONArray(json)
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                val d = o.optString("date")
+                val pretty = when {
+                    d.length == 5 -> d
+                    d.length == 10 && d[2] == '.' && d[5] == '.' -> d.substring(0, 5) // dd.MM.yyyy -> dd.MM
+                    else -> d
+                }
+                list.add(pretty to o.getDouble("weight").toFloat())
             }
             list
         } catch (_: Exception) { emptyList() }
     }
     var weightHistory by remember { mutableStateOf(loadWeightHistory()) }
 
+    var weightInput by rememberSaveable { mutableStateOf("") }
+    var weightError by remember { mutableStateOf<String?>(null) }
+
+    fun validateDateShort(text: String): String? {
+        // Требуем ДД.MM; проверяем корректность дня/месяца
+        val re = Regex("""^\d{2}\.\d{2}$""")
+        if (!re.matches(text)) return "Дата в формате ДД.ММ"
+        val day = text.substring(0, 2).toIntOrNull() ?: return "Неверный день"
+        val mon = text.substring(3, 5).toIntOrNull() ?: return "Неверный месяц"
+        if (mon !in 1..12) return "Месяц 01–12"
+        val maxDay = when (mon) {
+            1,3,5,7,8,10,12 -> 31
+            4,6,9,11 -> 30
+            else -> 29 // для февраля — допустим 29 без учёта года
+        }
+        if (day !in 1..maxDay) return "День 01–$maxDay"
+        return null
+    }
     fun validateWeight(text: String): String? {
         if (text.isBlank()) return "Введите вес"
         val normalized = text.replace(',', '.')
@@ -258,51 +387,67 @@ fun AnalyticsScreen(
         return null
     }
 
-    val onSaveWeight = {
+    val onSaveWeight: () -> Unit = {
         val err = validateWeight(weightInput)
         weightError = err
         if (err == null) {
             val value = weightInput.replace(',', '.').toFloat()
-            val date = SimpleDateFormat("dd.MM", Locale.getDefault()).format(Date())
-            val newHistory = (weightHistory + (date to value)).takeLast(30)
-            val array = JSONArray()
-            newHistory.forEach { (d, w) ->
-                array.put(JSONObject().apply { put("date", d); put("weight", w) })
+            val pretty = todayPrettyShort()
+            // upsert по дате dd.MM
+            val arrOld = JSONArray(prefs.getString(K_WEIGHT_JSON, "[]") ?: "[]")
+            val list = mutableListOf<JSONObject>()
+            for (i in 0 until arrOld.length()) list += arrOld.getJSONObject(i)
+            val updated = list.filterNot { it.optString("date").take(5) == pretty }.toMutableList()
+            updated += JSONObject().apply {
+                put("date", pretty)
+                put("weight", value)
             }
-            prefs.edit().putString("weight_history", array.toString()).apply()
-            weightHistory = newHistory
+            // сортировка по dd.MM (для графика не критично, но стабильнее)
+            updated.sortBy {
+                val d = it.optString("date").take(5)
+                val day = d.substring(0, 2).toIntOrNull() ?: 0
+                val mon = d.substring(3, 5).toIntOrNull() ?: 0
+                mon * 31 + day
+            }
+            val arr = JSONArray()
+            updated.takeLast(60).forEach { arr.put(it) }
+            prefs.edit().putString(K_WEIGHT_JSON, arr.toString()).apply()
+
+            weightHistory = updated.takeLast(60).map { it.optString("date").take(5) to it.getDouble("weight").toFloat() }
             weightInput = ""
+            scope.launch { showSnack("Вес сохранён") }
+        } else {
+            scope.launch { showSnack(err!!) }
         }
-        Unit
     }
 
-    // ===== BEST EXERCISES
+    /* ---------- Best exercises ---------- */
     val sessions by trainingViewModel.sessions.collectAsState()
     val bestExercises = sessions
         .flatMap { it.exercises }
         .groupBy { it.name }
-        .mapValues { (_, exercises) -> exercises.maxByOrNull { it.weight * it.reps } ?: exercises.first() }
+        .mapValues { (_, list) -> list.maxByOrNull { it.weight * it.reps * max(1, it.sets) } ?: list.first() }
         .values
-        .sortedByDescending { it.weight * it.reps }
-        .take(5)
+        .sortedByDescending { it.weight * it.reps * max(1, it.sets) }
+        .take(bestExercisesLimit)
 
-    // ===== Settings + Weight editor dialogs
+    /* ---------- Dialogs state ---------- */
     var showSettings by remember { mutableStateOf(false) }
     var showWeightEditor by remember { mutableStateOf(false) }
 
-    // ===== UI =====
+    /* ===================== UI ===================== */
     Scaffold(
         topBar = {
             SectionHeader(
                 title = "Аналитика",
-                titleStyle = MaterialTheme.typography.headlineSmall,
                 actions = {
                     IconButton(onClick = { showSettings = true }) {
                         Icon(Icons.Default.Tune, contentDescription = "Настройки аналитики")
                     }
                 }
             )
-        }
+        },
+        snackbarHost = { SnackbarHost(snackbarHost) }
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier
@@ -312,21 +457,21 @@ fun AnalyticsScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             item {
-                StepsCard(
+                StepsCardPretty(
                     steps = stepsToday,
                     goal = stepGoal,
                     hasPermission = hasStepPermission,
-                    onRequest = { permissionLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION) }
+                    onRequest = { stepPermLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION) }
                 )
             }
-            item { WeatherCard(weather = weather, subtitle = weatherSubtitle, city = city) }
-            item { NutritionTodayCard(total = total, norm = nutritionViewModel.dailyNorm) }
+            item { WeatherCardPretty(city = city, weather = weather, subtitle = weatherSubtitle) }
+            item { NutritionTodayCardPretty(total = todayTotal, norm = nutritionViewModel.dailyNorm) }
             item {
-                WeightInputCard(
+                WeightInputCardPretty(
                     input = weightInput,
                     error = weightError,
-                    onInputChange = { text ->
-                        weightInput = text.filter { it.isDigit() || it == '.' || it == ',' }
+                    onInputChange = {
+                        weightInput = it.filter { ch -> ch.isDigit() || ch == '.' || ch == ',' }
                         weightError = null
                     },
                     onSave = onSaveWeight,
@@ -334,22 +479,42 @@ fun AnalyticsScreen(
                     onEditClick = { showWeightEditor = true }
                 )
             }
-            item { BestExercisesCard(exercises = bestExercises) }
+            item { BestExercisesCardPretty(exercises = bestExercises) }
+            item {
+                if (notifyStepsEnabled && Build.VERSION.SDK_INT >= 33 && !hasNotifPermission) {
+                    FilledTonalButton(onClick = { notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }) {
+                        Icon(Icons.Default.Notifications, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Включить уведомления")
+                    }
+                }
+            }
         }
     }
 
     if (showSettings) {
-        AnalyticsSettingsDialog(
+        AnalyticsSettingsDialogPretty(
             currentCity = city,
             currentGoal = stepGoal.toString(),
-            onSave = { newCity, newGoal ->
-                val cityTrim = newCity.trim().ifBlank { "Москва" }
-                val goalInt = newGoal.toIntOrNull()?.coerceIn(1000, 50000) ?: 8000
-                prefs.edit().putString(K_CITY, cityTrim).putInt(K_STEP_GOAL, goalInt).apply()
-                city = cityTrim
-                stepGoal = goalInt
-                scope.launch { fetchAndCacheWeather(cityTrim) }
+            currentNotify = notifyStepsEnabled,
+            bestLimit = bestExercisesLimit,
+            onSave = { newCity, newGoal, notify, bestLimitNew ->
+                val c = newCity.trim().ifBlank { "Москва" }
+                val g = newGoal.toIntOrNull()?.coerceIn(1000, 50000) ?: 8000
+                val bl = bestLimitNew.coerceIn(1, 10)
+                prefs.edit()
+                    .putString(K_CITY, c)
+                    .putInt(K_STEP_GOAL, g)
+                    .putBoolean(K_NOTIFY_ENABLED, notify)
+                    .putInt(K_BEST_EX_LIMIT, bl)
+                    .apply()
+                city = c
+                stepGoal = g
+                notifyStepsEnabled = notify
+                bestExercisesLimit = bl
+                scope.launch { fetchAndCacheWeather(c) }
                 showSettings = false
+                scope.launch { showSnack("Настройки сохранены") }
             },
             onRefreshWeather = { scope.launch { fetchAndCacheWeather(city) } },
             onDismiss = { showSettings = false }
@@ -357,106 +522,265 @@ fun AnalyticsScreen(
     }
 
     if (showWeightEditor) {
-        EditWeightHistoryDialog(
+        EditWeightHistoryDialogPretty(
             initial = weightHistory,
+            validateDate = ::validateDateShort,
+            validateWeight = ::validateWeight,
             onSave = { updated ->
-                val array = JSONArray()
-                updated.forEach { (d, w) ->
-                    array.put(JSONObject().apply { put("date", d); put("weight", w) })
+                // сортируем и сохраняем
+                val sorted = updated.sortedBy {
+                    val d = it.first
+                    val day = d.substring(0, 2).toIntOrNull() ?: 0
+                    val mon = d.substring(3, 5).toIntOrNull() ?: 0
+                    mon * 31 + day
                 }
-                prefs.edit().putString("weight_history", array.toString()).apply()
-                weightHistory = updated
+                val arr = JSONArray()
+                sorted.forEach { (pretty, w) ->
+                    arr.put(JSONObject().apply {
+                        put("date", pretty)
+                        put("weight", w)
+                    })
+                }
+                prefs.edit().putString(K_WEIGHT_JSON, arr.toString()).apply()
+                weightHistory = sorted
                 showWeightEditor = false
+                scope.launch { showSnack("История веса обновлена") }
             },
             onDismiss = { showWeightEditor = false }
         )
     }
 }
 
-// ===== components =====
+/* ===================== Pretty helpers ===================== */
 
 @Composable
-fun StepsCard(steps: Long, goal: Int, hasPermission: Boolean, onRequest: () -> Unit) {
+private fun gradientPrimary(): Brush = Brush.linearGradient(
+    listOf(
+        MaterialTheme.colorScheme.primaryContainer,
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
+    )
+)
+@Composable
+private fun gradientSecondary(): Brush = Brush.linearGradient(
+    listOf(
+        MaterialTheme.colorScheme.secondaryContainer,
+        MaterialTheme.colorScheme.tertiaryContainer
+    )
+)
+
+/* ====== Толстая, скруглённая линейка прогресса ====== */
+@Composable
+fun FatLinearProgress(
+    progress: Float,
+    modifier: Modifier = Modifier,
+    height: Dp = 18.dp,
+    cornerRadius: Dp = 10.dp
+) {
+    val trackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+    val gradient = Brush.horizontalGradient(
+        listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.tertiary)
+    )
+    val rPx = with(LocalDensity.current) { cornerRadius.toPx() }
+    Canvas(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(height)
+    ) {
+        val w = size.width
+        val h = size.height
+        drawRoundRect(
+            color = trackColor,
+            size = Size(w, h),
+            cornerRadius = CornerRadius(rPx, rPx)
+        )
+        val pw = (w * progress.coerceIn(0f, 1f))
+        if (pw > 0f) {
+            drawRoundRect(
+                brush = gradient,
+                size = Size(pw, h),
+                cornerRadius = CornerRadius(rPx, rPx)
+            )
+        }
+    }
+}
+
+/* ===================== Cards ===================== */
+
+@Composable
+fun StepsCardPretty(
+    steps: Long,
+    goal: Int,
+    hasPermission: Boolean,
+    onRequest: () -> Unit
+) {
     val progress = (steps.toFloat() / goal.coerceAtLeast(1)).coerceIn(0f, 1f)
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.DirectionsWalk, contentDescription = null)
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text("Шаги сегодня", style = MaterialTheme.typography.titleMedium)
-                Text("$steps / $goal", style = MaterialTheme.typography.headlineSmall)
-                LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
-            }
-            if (!hasPermission) {
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.elevatedCardColors(containerColor = Color.Transparent),
+        elevation = CardDefaults.elevatedCardElevation(2.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .background(gradientPrimary(), RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
+                .padding(16.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surface),
+                    contentAlignment = Alignment.Center
+                ) { Icon(Icons.Default.DirectionsWalk, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
                 Spacer(Modifier.width(12.dp))
-                TextButton(onClick = onRequest) { Text("Разрешить") }
+                Text("Шаги сегодня", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.weight(1f))
+                if (!hasPermission) {
+                    FilledTonalButton(onClick = onRequest, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)) {
+                        Text("Разрешить")
+                    }
+                }
             }
+            Spacer(Modifier.height(8.dp))
+            Text("$steps / $goal", style = MaterialTheme.typography.headlineSmall)
+            Spacer(Modifier.height(6.dp))
+            FatLinearProgress(progress = progress)
         }
     }
 }
 
 @Composable
-fun WeatherCard(weather: String, subtitle: String?, city: String) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.WbSunny, contentDescription = null)
+fun WeatherCardPretty(city: String, weather: String, subtitle: String?) {
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.elevatedCardColors(containerColor = Color.Transparent),
+        elevation = CardDefaults.elevatedCardElevation(2.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .background(gradientSecondary())
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surface),
+                contentAlignment = Alignment.Center
+            ) { Icon(Icons.Default.WbSunny, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary) }
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text("Погода • $city", style = MaterialTheme.typography.titleMedium)
-                Text(weather, style = MaterialTheme.typography.bodyMedium) // ← фикс опечатки
-                if (subtitle != null) {
+                Text(weather, style = MaterialTheme.typography.bodyMedium)
+                if (subtitle != null)
                     Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
             }
         }
     }
 }
 
+/* ====== Равные круглые кольца КБЖУ ====== */
 @Composable
-fun NutritionTodayCard(total: NutritionEntry, norm: Map<String, Int>) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+fun NutritionTodayCardPretty(total: NutritionEntry, norm: Map<String, Int>) {
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.elevatedCardElevation(1.dp)
+    ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text("КБЖУ сегодня", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.SpaceEvenly, modifier = Modifier.fillMaxWidth()) {
-                RingMacro("Кал", total.calories, norm["calories"] ?: 2000, Color.Red)
-                RingMacro("Б", total.protein, norm["protein"] ?: 100, Color(0xFF2E7D32))
-                RingMacro("Ж", total.fats, norm["fats"] ?: 70, Color(0xFFF9A825))
-                RingMacro("У", total.carbs, norm["carbs"] ?: 250, Color(0xFF1565C0))
+            Row(
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                RingMacro(
+                    label = "Кал",
+                    value = total.calories,
+                    norm = norm["calories"] ?: 2000,
+                    gradient = Brush.sweepGradient(listOf(Color(0xFFFF8A65), Color(0xFFFF7043), Color(0xFFFF8A65)))
+                )
+                RingMacro(
+                    label = "Б",
+                    value = total.protein,
+                    norm = norm["protein"] ?: 100,
+                    gradient = Brush.sweepGradient(listOf(Color(0xFF66BB6A), Color(0xFF2E7D32), Color(0xFF66BB6A)))
+                )
+                RingMacro(
+                    label = "Ж",
+                    value = total.fats,
+                    norm = norm["fats"] ?: 70,
+                    gradient = Brush.sweepGradient(listOf(Color(0xFFFFD54F), Color(0xFFF9A825), Color(0xFFFFD54F)))
+                )
+                RingMacro(
+                    label = "У",
+                    value = total.carbs,
+                    norm = norm["carbs"] ?: 250,
+                    gradient = Brush.sweepGradient(listOf(Color(0xFF64B5F6), Color(0xFF1565C0), Color(0xFF64B5F6)))
+                )
             }
         }
     }
 }
 
 @Composable
-fun RingMacro(label: String, value: Int, norm: Int, color: Color) {
-    val progress = (value.toFloat() / norm).coerceIn(0f, 1f)
-    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(70.dp)) {
+fun RingMacro(label: String, value: Int, norm: Int, gradient: Brush) {
+    val progress = (value.toFloat() / norm.coerceAtLeast(1)).coerceIn(0f, 1f)
+    val pct = ((progress * 100f).coerceIn(0f, 100f)).roundToInt()
+
+    val ringTrack = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+    val innerShade = MaterialTheme.colorScheme.surface.copy(alpha = 0.05f)
+
+    val ringSize = 72.dp
+    val strokeWidthDp = 10.dp
+    val strokePx = with(LocalDensity.current) { strokeWidthDp.toPx() }
+
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier.size(ringSize) // фиксированный квадрат
+    ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
+            val d = min(size.width, size.height)
+            val inset = strokePx / 2f
+            val rect = Rect(
+                left = (size.width - d) / 2f + inset,
+                top = (size.height - d) / 2f + inset,
+                right = (size.width + d) / 2f - inset,
+                bottom = (size.height + d) / 2f - inset
+            )
+            val arcSize = Size(rect.width, rect.height)
+
             drawArc(
-                color = color.copy(alpha = 0.3f),
-                startAngle = -90f,
-                sweepAngle = 360f,
-                useCenter = false,
-                style = androidx.compose.ui.graphics.drawscope.Stroke(12f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                color = ringTrack,
+                startAngle = -90f, sweepAngle = 360f, useCenter = false,
+                style = Stroke(width = strokePx, cap = StrokeCap.Round),
+                topLeft = Offset(rect.left, rect.top),
+                size = arcSize
             )
             drawArc(
-                color = color,
-                startAngle = -90f,
-                sweepAngle = 360f * progress,
-                useCenter = false,
-                style = androidx.compose.ui.graphics.drawscope.Stroke(12f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                brush = gradient,
+                startAngle = -90f, sweepAngle = 360f * progress, useCenter = false,
+                style = Stroke(width = strokePx, cap = StrokeCap.Round),
+                topLeft = Offset(rect.left, rect.top),
+                size = arcSize
+            )
+            drawCircle(
+                color = innerShade,
+                radius = d / 2.6f,
+                center = rect.center
             )
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("${(progress * 100).toInt()}%", style = MaterialTheme.typography.labelSmall)
+            Text("$pct%", style = MaterialTheme.typography.labelSmall)
             Text(label, style = MaterialTheme.typography.labelSmall)
         }
     }
 }
 
 @Composable
-fun WeightInputCard(
+fun WeightInputCardPretty(
     input: String,
     error: String?,
     onInputChange: (String) -> Unit,
@@ -464,7 +788,11 @@ fun WeightInputCard(
     history: List<Pair<String, Float>>,
     onEditClick: () -> Unit
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.elevatedCardElevation(1.dp)
+    ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 Text("Вес тела", style = MaterialTheme.typography.titleMedium)
@@ -479,11 +807,11 @@ fun WeightInputCard(
                     label = { Text("кг") },
                     isError = error != null,
                     supportingText = { if (error != null) Text(error, color = MaterialTheme.colorScheme.error) },
-                    modifier = Modifier.weight(1f),
-                    singleLine = true
+                    singleLine = true,
+                    modifier = Modifier.weight(1f)
                 )
                 Spacer(Modifier.width(8.dp))
-                Button(onClick = onSave, enabled = input.isNotBlank()) { Text("Сохранить") }
+                Button(onClick = onSave, enabled = input.isNotBlank(), modifier = Modifier.height(48.dp)) { Text("Сохранить") }
             }
             if (history.isNotEmpty()) {
                 Spacer(Modifier.height(12.dp))
@@ -497,166 +825,13 @@ fun WeightInputCard(
                     Text("Вес, кг", style = MaterialTheme.typography.bodySmall)
                 }
                 Spacer(Modifier.height(8.dp))
-                WeightChartWithAxes(history)
-                Spacer(Modifier.height(8.dp))
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    history.forEach { (date, _) ->
-                        Text(text = date, modifier = Modifier.weight(1f), textAlign = TextAlign.Center, style = MaterialTheme.typography.labelSmall)
-                    }
-                }
+                WeightChartWithAxes(history) // подписи X делает сама функция (макс. 3)
             }
         }
     }
 }
 
-/** Настройки: цель по шагам, город, обновление погоды. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun AnalyticsSettingsDialog(
-    currentCity: String,
-    currentGoal: String,
-    onSave: (newCity: String, newGoal: String) -> Unit,
-    onRefreshWeather: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    var city by remember { mutableStateOf(currentCity) }
-    var goal by remember { mutableStateOf(currentGoal) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        icon = { Icon(Icons.Default.Tune, contentDescription = null) },
-        title = { Text("Настройки аналитики") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(
-                    value = goal,
-                    onValueChange = { goal = it.filter { ch -> ch.isDigit() } },
-                    label = { Text("Цель по шагам (шт.)") },
-                    singleLine = true,
-                    leadingIcon = { Icon(Icons.Default.Flag, contentDescription = null) }
-                )
-                OutlinedTextField(
-                    value = city,
-                    onValueChange = { city = it },
-                    label = { Text("Город для погоды") },
-                    singleLine = true,
-                    leadingIcon = { Icon(Icons.Default.LocationCity, contentDescription = null) }
-                )
-                OutlinedButton(onClick = onRefreshWeather) {
-                    Icon(Icons.Default.Refresh, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Обновить погоду сейчас")
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = { onSave(city, goal) }) { Text("Сохранить") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
-    )
-}
-
-/** Редактор истории веса c устойчивыми ключами и удалением по id. */
-@SuppressLint("UnrememberedMutableState")
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun EditWeightHistoryDialog(
-    initial: List<Pair<String, Float>>,
-    onSave: (List<Pair<String, Float>>) -> Unit,
-    onDismiss: () -> Unit
-) {
-    // State-holder для строки с устойчивым ключом
-    class RowItem(
-        val id: String = UUID.randomUUID().toString(),
-        date: String,
-        weight: String
-    ) {
-        var date by mutableStateOf(date)
-        var weight by mutableStateOf(weight)
-    }
-
-    // Локальный snapshotStateList — любые изменения полей RowItem перерисуют UI
-    val rows = remember {
-        mutableStateListOf<RowItem>().apply {
-            initial.forEach { add(RowItem(date = it.first.trim(), weight = it.second.toString())) }
-        }
-    }
-
-    val dateRegex = Regex("""\d{2}\.\d{2}""")
-    fun validateRow(date: String, weightStr: String): String? {
-        val d = date.trim()
-        if (!dateRegex.matches(d)) return "Дата в формате ДД.ММ"
-        val normalized = weightStr.trim().replace(',', '.')
-        val v = normalized.toFloatOrNull() ?: return "Формат веса (пример: 72.4)"
-        if (v < 30f || v > 300f) return "Диапазон 30–300"
-        return null
-    }
-
-    val canSave by derivedStateOf {
-        rows.all { validateRow(it.date, it.weight) == null }
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        icon = { Icon(Icons.Default.EditCalendar, contentDescription = null) },
-        title = { Text("Редактирование веса") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Измените дату и/или вес. Можно удалять строки.")
-                Spacer(Modifier.height(4.dp))
-
-                rows.forEach { item ->
-                    val err = validateRow(item.date, item.weight)
-
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                        OutlinedTextField(
-                            value = item.date,
-                            onValueChange = { v ->
-                                item.date = v.filter { ch -> ch.isDigit() || ch == '.' }.take(5)
-                            },
-                            label = { Text("Дата (ДД.ММ)") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        OutlinedTextField(
-                            value = item.weight,
-                            onValueChange = { v ->
-                                item.weight = v.filter { ch -> ch.isDigit() || ch == '.' || ch == ',' }
-                            },
-                            label = { Text("Вес (кг)") },
-                            singleLine = true,
-                            isError = err != null,
-                            supportingText = { if (err != null) Text(err) },
-                            modifier = Modifier.weight(1f)
-                        )
-                        IconButton(
-                            onClick = { rows.removeAll { it.id == item.id } },
-                            colors = IconButtonDefaults.iconButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                        ) { Icon(Icons.Default.Delete, contentDescription = "Удалить") }
-                    }
-                }
-
-                if (rows.isEmpty()) {
-                    Text("Нет записей", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    val result = rows.map { it.date.trim() to it.weight.trim().replace(',', '.').toFloat() }
-                    onSave(result)
-                },
-                enabled = canSave // теперь корректно считается и разблокируется
-            ) { Text("Сохранить") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
-    )
-}
-
-
-/**
- * Диаграмма без nativeCanvas — в Canvas не вызываем @Composable API.
- */
+/* ====== График веса: максимум 3 подписи по X (начало/середина/конец) ====== */
 @Composable
 fun WeightChartWithAxes(data: List<Pair<String, Float>>) {
     val primaryColor = MaterialTheme.colorScheme.primary
@@ -671,58 +846,76 @@ fun WeightChartWithAxes(data: List<Pair<String, Float>>) {
     val minVal = values.minOrNull() ?: 0f
     val displayMax = if (maxVal == minVal) maxVal + 1f else maxVal
     val displayMin = if (maxVal == minVal) minVal - 1f else minVal
-    val range = max(0.1f, displayMax - displayMin)
+    val range = kotlin.math.max(0.1f, displayMax - displayMin)
     val stepsY = 4
 
-    Row(
+    // индексы X: максимум 3 (начало/середина/конец)
+    val labelIndices: List<Int> = when {
+        data.isEmpty() -> emptyList()
+        data.size == 1 -> listOf(0)
+        data.size == 2 -> listOf(0, 1)
+        else -> listOf(0, data.size / 2, data.lastIndex)
+    }
+    val xLabels = labelIndices.map { data[it].first }
+
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(180.dp)
+            .height(210.dp)
     ) {
-        Column(
+        Box(
             modifier = Modifier
-                .width(56.dp)
-                .fillMaxHeight(),
-            verticalArrangement = Arrangement.SpaceBetween
-        ) {
-            for (i in stepsY downTo 0) {
-                val fy = i / stepsY.toFloat()
-                val value = displayMin + range * fy
-                Text(
-                    text = "%.1f".format(value),
-                    style = labelStyle,
-                    textAlign = TextAlign.End,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(end = 4.dp)
-                )
-            }
-        }
-
-        Box(modifier = Modifier
-            .weight(1f)
-            .fillMaxHeight()
+                .weight(1f)
+                .fillMaxWidth()
         ) {
             val paddingPx = with(density) { paddingDp.toPx() }
+            val xLabelPadPx = with(density) { 8.dp.toPx() }
+
+            // paint для Y-меток — РИСУЕМ ИХ В CANVAS (точное совпадение по Y)
+            val yPaint = remember {
+                android.graphics.Paint().apply {
+                    isAntiAlias = true
+                    textAlign = android.graphics.Paint.Align.RIGHT
+                }
+            }.also {
+                it.textSize = with(density) { 10.sp.toPx() }
+                it.color = android.graphics.Color.GRAY
+            }
+
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val width = size.width
                 val height = size.height
-                val paddingLeft = paddingPx.coerceAtMost(width * 0.2f)
+
+                // оставляем место слева под подписи Y
+                val maxYLabel = listOf(displayMin, displayMax).maxBy { "%.1f".format(it).length }
+                val approxYTextWidth = yPaint.measureText("%.1f".format(maxYLabel))
+                val paddingLeft = kotlin.math.max(approxYTextWidth + xLabelPadPx, paddingPx * 0.8f)
                 val paddingRight = paddingPx.coerceAtMost(width * 0.05f)
                 val paddingTop = paddingPx.coerceAtMost(height * 0.1f)
-                val paddingBottom = paddingPx.coerceAtMost(height * 0.12f)
+                val paddingBottom = (paddingPx * 1.2f).coerceAtMost(height * 0.22f)
+
                 val graphWidth = (width - paddingLeft - paddingRight).coerceAtLeast(1f)
                 val graphHeight = (height - paddingTop - paddingBottom).coerceAtLeast(1f)
 
+                // Оси
                 drawLine(axisColor, Offset(paddingLeft, paddingTop), Offset(paddingLeft, height - paddingBottom), 2f)
                 drawLine(axisColor, Offset(paddingLeft, height - paddingBottom), Offset(width - paddingRight, height - paddingBottom), 2f)
 
+                // Горизонтальная сетка + МЕТКИ Y (в Canvas, по тем же Y)
                 for (i in 0..stepsY) {
                     val fy = i / stepsY.toFloat()
                     val y = paddingTop + graphHeight * (1f - fy)
                     drawLine(gridColor, Offset(paddingLeft, y), Offset(width - paddingRight, y), 1f)
+
+                    // текст Y
+                    val value = displayMin + range * fy
+                    val label = "%.1f".format(value)
+                    val fm = yPaint.fontMetrics
+                    val baseline = y - (fm.ascent + fm.descent) / 2f
+                    drawContext.canvas.nativeCanvas.drawText(label, paddingLeft - xLabelPadPx, baseline, yPaint)
                 }
 
+                // График
                 if (data.isNotEmpty()) {
                     if (data.size == 1) {
                         val x = paddingLeft + graphWidth / 2f
@@ -740,16 +933,51 @@ fun WeightChartWithAxes(data: List<Pair<String, Float>>) {
                             prevX = x
                             prevY = y
                         }
+
+                        // риски под выбранные подписи X
+                        labelIndices.forEach { idx ->
+                            val x = paddingLeft + idx * stepX
+                            drawLine(
+                                color = gridColor,
+                                start = Offset(x, height - paddingBottom),
+                                end = Offset(x, height - paddingBottom + 6f),
+                                strokeWidth = 1f
+                            )
+                        }
                     }
+                }
+            }
+        }
+
+        // Подписи X (1–3 шт), в одну строку
+        if (xLabels.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 12.dp, end = 12.dp), // Y-метки уже в Canvas, поэтому маленький отступ
+                horizontalArrangement = when (xLabels.size) {
+                    1 -> Arrangement.Center
+                    2 -> Arrangement.SpaceBetween
+                    else -> Arrangement.SpaceBetween
+                }
+            ) {
+                xLabels.forEach { lbl ->
+                    Text(lbl, style = labelStyle, maxLines = 1)
                 }
             }
         }
     }
 }
 
+
+
 @Composable
-fun BestExercisesCard(exercises: Collection<ExerciseEntry>) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+fun BestExercisesCardPretty(exercises: Collection<ExerciseEntry>) {
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.elevatedCardElevation(1.dp)
+    ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text("Лучшие результаты", style = MaterialTheme.typography.titleMedium)
             if (exercises.isEmpty()) {
@@ -762,7 +990,7 @@ fun BestExercisesCard(exercises: Collection<ExerciseEntry>) {
                             Spacer(Modifier.width(8.dp))
                             Column {
                                 Text(ex.name, style = MaterialTheme.typography.titleSmall)
-                                Text("${ex.weight} кг × ${ex.reps} × ${ex.sets}", style = MaterialTheme.typography.bodySmall)
+                                Text("${ex.weight} кг × ${ex.reps} × ${max(1, ex.sets)}", style = MaterialTheme.typography.bodySmall)
                             }
                         }
                     }
@@ -771,3 +999,298 @@ fun BestExercisesCard(exercises: Collection<ExerciseEntry>) {
         }
     }
 }
+
+/* ===================== Settings (компактные и стабильные) ===================== */
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AnalyticsSettingsDialogPretty(
+    currentCity: String,
+    currentGoal: String,
+    currentNotify: Boolean,
+    bestLimit: Int,
+    onSave: (newCity: String, newGoal: String, notify: Boolean, bestExercisesLimit: Int) -> Unit,
+    onRefreshWeather: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var city by remember { mutableStateOf(currentCity) }
+    var goal by remember { mutableStateOf(currentGoal) }
+    var notifyEnabled by remember { mutableStateOf(currentNotify) }
+    var bestLimitState by remember { mutableStateOf(bestLimit.coerceIn(1, 10)) }
+
+    var goalError by remember { mutableStateOf<String?>(null) }
+    fun validateGoal(s: String): String? {
+        if (s.isBlank()) return "Укажите цель по шагам"
+        val v = s.toIntOrNull() ?: return "Только целое число"
+        if (v !in 1000..50000) return "Диапазон 1 000–50 000"
+        return null
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.Tune, contentDescription = null) },
+        title = { Text("Настройки аналитики") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+
+                // Баннер
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            Brush.horizontalGradient(
+                                listOf(
+                                    MaterialTheme.colorScheme.secondaryContainer,
+                                    MaterialTheme.colorScheme.primaryContainer
+                                )
+                            ),
+                            RoundedCornerShape(12.dp)
+                        )
+                        .padding(12.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Info, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Настройте город, шаги и уведомления.")
+                    }
+                }
+
+                OutlinedTextField(
+                    value = goal,
+                    onValueChange = {
+                        goal = it.filter { ch -> ch.isDigit() }
+                        goalError = null
+                    },
+                    label = { Text("Цель по шагам (шт.)") },
+                    leadingIcon = { Icon(Icons.Default.Flag, contentDescription = null) },
+                    singleLine = true,
+                    isError = goalError != null,
+                    supportingText = { if (goalError != null) Text(goalError!!, color = MaterialTheme.colorScheme.error) }
+                )
+                OutlinedTextField(
+                    value = city,
+                    onValueChange = { city = it },
+                    label = { Text("Город для погоды") },
+                    leadingIcon = { Icon(Icons.Default.LocationCity, contentDescription = null) },
+                    singleLine = true
+                )
+
+                // Переключатель уведомлений
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            if (notifyEnabled) Icons.Default.Notifications else Icons.Default.NotificationsOff,
+                            contentDescription = null
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (notifyEnabled) "Уведомления: вкл." else "Уведомления: выкл.")
+                    }
+                    Switch(checked = notifyEnabled, onCheckedChange = { notifyEnabled = it })
+                }
+
+                // Заголовок блока
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.FitnessCenter, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Показывать топ упражнений")
+                }
+                // Отдельной строкой:  −  число  +
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 2.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedIconButton(
+                        onClick = { bestLimitState = max(1, bestLimitState - 1) },
+                        enabled = bestLimitState > 1
+                    ) { Icon(Icons.Default.Remove, contentDescription = "Уменьшить") }
+
+                    Text(
+                        "$bestLimitState",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(horizontal = 12.dp)
+                    )
+
+                    OutlinedIconButton(
+                        onClick = { bestLimitState = min(10, bestLimitState + 1) },
+                        enabled = bestLimitState < 10
+                    ) { Icon(Icons.Default.Add, contentDescription = "Увеличить") }
+                }
+
+                FilledTonalButton(onClick = onRefreshWeather) {
+                    Icon(Icons.Default.Refresh, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Обновить погоду сейчас")
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val err = validateGoal(goal)
+                goalError = err
+                if (err == null) onSave(city, goal, notifyEnabled, bestLimitState)
+            }) { Text("Сохранить") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
+    )
+}
+
+
+
+/* ===================== Weight Editor (валидация dd.MM + компакт) ===================== */
+
+@SuppressLint("UnrememberedMutableState")
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EditWeightHistoryDialogPretty(
+    initial: List<Pair<String, Float>>,
+    validateDate: (String) -> String?,
+    validateWeight: (String) -> String?,
+    onSave: (List<Pair<String, Float>>) -> Unit,
+    onDismiss: () -> Unit
+) {
+    class RowItem(
+        val id: String = UUID.randomUUID().toString(),
+        date: String,
+        weight: String
+    ) {
+        var date by mutableStateOf(date)
+        var weight by mutableStateOf(weight)
+    }
+
+    val rows = remember {
+        mutableStateListOf<RowItem>().apply {
+            initial.forEach { add(RowItem(date = it.first.trim(), weight = it.second.toString())) }
+        }
+    }
+
+    fun hasDuplicateDates(): Boolean {
+        val set = HashSet<String>()
+        rows.forEach { if (!set.add(it.date.trim())) return true }
+        return false
+    }
+
+    val canSave by derivedStateOf {
+        rows.isNotEmpty()
+                && rows.all { validateDate(it.date) == null && validateWeight(it.weight) == null }
+                && !hasDuplicateDates()
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.EditCalendar, contentDescription = null) },
+        title = { Text("Редактирование веса") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            Brush.horizontalGradient(
+                                listOf(
+                                    MaterialTheme.colorScheme.tertiaryContainer,
+                                    MaterialTheme.colorScheme.secondaryContainer
+                                )
+                            ),
+                            RoundedCornerShape(10.dp)
+                        )
+                        .padding(10.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.TipsAndUpdates, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Дата — ДД.ММ (корректные значения). Вес — 30–300 кг. Без повторов дат.")
+                    }
+                }
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    FilledTonalButton(onClick = {
+                        val todayShort = SimpleDateFormat("dd.MM", Locale.getDefault()).format(Date())
+                        rows.add(RowItem(date = todayShort, weight = ""))
+                    }) {
+                        Icon(Icons.Default.Add, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Добавить")
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 160.dp, max = 380.dp)
+                ) {
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(rows, key = { it.id }) { item ->
+                            val errDate = validateDate(item.date)
+                            val errWeight = validateWeight(item.weight)
+                            ElevatedCard(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(10.dp)
+                                ) {
+                                    OutlinedTextField(
+                                        value = item.date,
+                                        onValueChange = { v ->
+                                            val filtered = v.filter { ch -> ch.isDigit() || ch == '.' }
+                                            item.date = filtered.take(5)
+                                        },
+                                        label = { Text("Дата (ДД.ММ)") },
+                                        singleLine = true,
+                                        isError = errDate != null,
+                                        supportingText = { if (errDate != null) Text(errDate) },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    OutlinedTextField(
+                                        value = item.weight,
+                                        onValueChange = { v -> item.weight = v.filter { ch -> ch.isDigit() || ch == '.' || ch == ',' } },
+                                        label = { Text("Вес (кг)") },
+                                        singleLine = true,
+                                        isError = errWeight != null,
+                                        supportingText = { if (errWeight != null) Text(errWeight) },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    IconButton(
+                                        onClick = { rows.removeAll { it.id == item.id } },
+                                        colors = IconButtonDefaults.iconButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                                    ) { Icon(Icons.Default.Delete, contentDescription = "Удалить") }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                AnimatedVisibility(visible = hasDuplicateDates(), enter = expandVertically(), exit = shrinkVertically()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                        Spacer(Modifier.width(6.dp))
+                        Text("В списке есть повторяющиеся даты", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val result = rows.map { it.date.trim() to it.weight.trim().replace(',', '.').toFloat() }
+                    onSave(result)
+                },
+                enabled = canSave
+            ) { Text("Сохранить") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
+    )
+}
+
