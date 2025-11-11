@@ -80,8 +80,6 @@ fun MainScreen(navController: NavController) {
                     BottomNavItem.Analytics.route -> AnalyticsScreen()
                     BottomNavItem.Articles.route -> ArticlesScreen(trainingViewModel, articleViewModel)
                     BottomNavItem.Achieve.route -> AchievementsScreen(
-                        trainingViewModel = trainingViewModel,
-                        articleViewModel = articleViewModel,
                         achievementViewModel = achievementViewModel
                     )
                     BottomNavItem.Profile.route -> ProfileScreen(authViewModel) {
