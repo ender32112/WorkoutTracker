@@ -440,6 +440,7 @@ fun AnalyticsScreen(
         topBar = {
             SectionHeader(
                 title = "Аналитика",
+                titleStyle = MaterialTheme.typography.headlineSmall,
                 actions = {
                     IconButton(onClick = { showSettings = true }) {
                         Icon(Icons.Default.Tune, contentDescription = "Настройки аналитики")

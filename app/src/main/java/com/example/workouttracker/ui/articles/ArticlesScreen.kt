@@ -49,6 +49,7 @@ fun ArticlesScreen(
         topBar = {
             SectionHeader(
                 title = "Статьи",
+                titleStyle = MaterialTheme.typography.headlineSmall,
                 actions = {}
             )
         },
