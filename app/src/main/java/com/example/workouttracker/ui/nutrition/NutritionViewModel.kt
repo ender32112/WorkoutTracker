@@ -44,7 +44,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                         protein = obj.getInt("protein"),
                         carbs = obj.getInt("carbs"),
                         fats = obj.getInt("fats"),
-                        weight = obj.optInt("weight", 100) // ← обратная совместимость
+                        weight = obj.optInt("weight", 100) // обратная совместимость
                     )
                 )
             }
@@ -96,10 +96,10 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     fun updateNorm(norm: Map<String, Int>) {
         dailyNorm = norm
         with(prefs.edit()) {
-            putInt("norm_calories", norm["calories"]!!)
-            putInt("protein".let { "norm_$it" }, norm["protein"]!!)
-            putInt("carbs".let { "norm_$it" }, norm["carbs"]!!)
-            putInt("fats".let { "norm_$it" }, norm["fats"]!!)
+            putInt("norm_calories", norm["calories"] ?: 2500)
+            putInt("norm_protein",  norm["protein"]  ?: 120)
+            putInt("norm_carbs",    norm["carbs"]    ?: 300)
+            putInt("norm_fats",     norm["fats"]     ?: 80)
             apply()
         }
     }
