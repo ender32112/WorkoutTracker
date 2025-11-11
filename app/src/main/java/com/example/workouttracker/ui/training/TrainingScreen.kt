@@ -8,10 +8,13 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -23,6 +26,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -49,12 +56,9 @@ fun TrainingScreen(
 
     Scaffold(
         topBar = {
-            // ЕДИНАЯ ШАПКА
             SectionHeader(
                 title = "Тренировки",
                 titleStyle = MaterialTheme.typography.headlineSmall,
-                // subtitle = "История и план",               // при желании
-                // height = 48.dp,                            // локальная настройка (иначе — глобальная)
                 actions = {
                     FilledTonalButton(
                         onClick = { showCatalog = true },
@@ -129,9 +133,9 @@ fun TrainingScreen(
     }
 }
 
-/* ---------- ВСПОМОГАТЕЛЬНОЕ: сохранение фото в app-internal и декодер ---------- */
+/* ---------- утилиты фото (используются и в AddTrainingDialog) ---------- */
 
-private fun persistImageToInternal(context: android.content.Context, source: Uri): String? {
+internal fun persistImageToInternal(context: android.content.Context, source: Uri): String? {
     return try {
         val dir = File(context.filesDir, "exercise_photos").apply { mkdirs() }
         val ext = when (context.contentResolver.getType(source)) {
@@ -149,7 +153,7 @@ private fun persistImageToInternal(context: android.content.Context, source: Uri
     }
 }
 
-private fun loadBitmapFlexible(context: android.content.Context, uriString: String?): Bitmap? {
+internal fun loadBitmapFlexible(context: android.content.Context, uriString: String?): Bitmap? {
     if (uriString.isNullOrBlank()) return null
     return try {
         val uri = Uri.parse(uriString)
@@ -195,7 +199,7 @@ private fun ExerciseCatalogDialog(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         value = newName,
-                        onValueChange = { newName = it },
+                        onValueChange = { newName = it.take(40) },
                         label = { Text("Название нового упражнения") },
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -250,7 +254,11 @@ private fun ExerciseCatalogDialog(
                             photoUri = uri?.let { persistImageToInternal(context, it) } ?: photoUri
                         }
 
-                        Card(modifier = Modifier.fillMaxWidth()) {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .shadow(2.dp, RoundedCornerShape(12.dp))
+                        ) {
                             Column(Modifier.padding(12.dp)) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
@@ -274,14 +282,20 @@ private fun ExerciseCatalogDialog(
                                 if (!edit) {
                                     val bmp = remember(photoUri) { loadBitmapFlexible(context, photoUri) }
                                     if (bmp != null) {
-                                        Image(bitmap = bmp.asImageBitmap(), contentDescription = null, modifier = Modifier.size(64.dp))
+                                        Image(
+                                            bitmap = bmp.asImageBitmap(),
+                                            contentDescription = null,
+                                            modifier = Modifier
+                                                .size(64.dp)
+                                                .clip(CircleShape)
+                                        )
                                     } else {
                                         Text("Фото не добавлено", color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                 } else {
                                     OutlinedTextField(
                                         value = name,
-                                        onValueChange = { name = it },
+                                        onValueChange = { name = it.take(40) },
                                         label = { Text("Название") },
                                         modifier = Modifier.fillMaxWidth()
                                     )
@@ -303,7 +317,13 @@ private fun ExerciseCatalogDialog(
                                         }
                                         val bmp = remember(photoUri) { loadBitmapFlexible(context, photoUri) }
                                         if (bmp != null) {
-                                            Image(bitmap = bmp.asImageBitmap(), contentDescription = null, modifier = Modifier.size(48.dp))
+                                            Image(
+                                                bitmap = bmp.asImageBitmap(),
+                                                contentDescription = null,
+                                                modifier = Modifier
+                                                    .size(48.dp)
+                                                    .clip(CircleShape)
+                                            )
                                         }
                                     }
 
@@ -313,18 +333,14 @@ private fun ExerciseCatalogDialog(
                                             .padding(top = 8.dp),
                                         horizontalArrangement = Arrangement.End
                                     ) {
-                                        TextButton(
-                                            onClick = { edit = false },
-                                            modifier = Modifier.height(40.dp)
-                                        ) { Text("Отмена", maxLines = 1, softWrap = false) }
+                                        TextButton(onClick = { edit = false }) { Text("Отмена") }
                                         TextButton(
                                             onClick = {
                                                 val newName = name.trim().ifBlank { item.name }
                                                 onUpdate(ExerciseCatalogItem(id = item.id, name = newName, photoUri = photoUri))
                                                 edit = false
-                                            },
-                                            modifier = Modifier.height(40.dp)
-                                        ) { Text("Сохранить", maxLines = 1, softWrap = false) }
+                                            }
+                                        ) { Text("Сохранить") }
                                     }
                                 }
                             }
@@ -348,17 +364,29 @@ fun TrainingCard(
     onDelete: () -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val context = LocalContext.current
 
-    Card(
-        onClick = { expanded = !expanded },
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(4.dp)
+    ElevatedCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(2.dp, RoundedCornerShape(16.dp)),
+        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 3.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxWidth()
-            ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.horizontalGradient(
+                        listOf(
+                            MaterialTheme.colorScheme.primaryContainer,
+                            MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.85f)
+                        )
+                    )
+                )
+                .padding(16.dp)
+        ) {
+            Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                 Column {
                     Text(
                         text = formatDateForDisplay(session.date),
@@ -382,13 +410,38 @@ fun TrainingCard(
             AnimatedVisibility(expanded) {
                 Column(modifier = Modifier.padding(top = 12.dp)) {
                     session.exercises.forEach { ex ->
-                        Text(
-                            text = "• ${ex.name}: ${ex.sets}×${ex.reps} @ ${ex.weight} кг",
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.padding(vertical = 2.dp)
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            val bmp = remember(ex.photoUri) { loadBitmapFlexible(context, ex.photoUri) }
+                            if (bmp != null) {
+                                Image(
+                                    bitmap = bmp.asImageBitmap(),
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                )
+                            } else {
+                                Spacer(Modifier.size(36.dp))
+                            }
+                            Text(
+                                text = "${ex.name}: ${ex.sets}×${ex.reps} @ ${ex.weight} кг",
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        Spacer(Modifier.height(4.dp))
                     }
                 }
+            }
+
+            // зона клика для раскрытия
+            Spacer(modifier = Modifier.height(6.dp))
+            TextButton(onClick = { expanded = !expanded }) {
+                Text(if (expanded) "Скрыть детали" else "Показать детали")
             }
         }
     }

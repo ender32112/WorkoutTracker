@@ -42,10 +42,12 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
                 val ex = exArray.getJSONObject(j)
                 exercises.add(
                     ExerciseEntry(
+                        // id не сериализовался раньше — создадим новый (обратная совместимость)
                         name = ex.getString("name"),
                         sets = ex.getInt("sets"),
                         reps = ex.getInt("reps"),
-                        weight = ex.getDouble("weight").toFloat()
+                        weight = ex.getDouble("weight").toFloat(),
+                        photoUri = if (ex.has("photoUri") && !ex.isNull("photoUri")) ex.getString("photoUri") else null
                     )
                 )
             }
@@ -70,10 +72,14 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
                 session.exercises.forEach { ex ->
                     exArray.put(
                         JSONObject().apply {
+                            // id упражнения в сессии можно не писать — не критичен для восстановления,
+                            // но если хочешь — можно сохранить:
+                            // put("id", ex.id.toString())
                             put("name", ex.name)
                             put("sets", ex.sets)
                             put("reps", ex.reps)
                             put("weight", ex.weight)
+                            put("photoUri", ex.photoUri)
                         }
                     )
                 }
