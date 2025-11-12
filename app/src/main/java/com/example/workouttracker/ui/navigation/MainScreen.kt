@@ -1,22 +1,20 @@
 package com.example.workouttracker.ui.navigation
 
 import android.app.Application
-import androidx.compose.animation.*
-import androidx.compose.animation.core.*
-import androidx.compose.foundation.layout.*
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
-import androidx.navigation.compose.currentBackStackEntryAsState
 import com.example.workouttracker.ui.achievements.AchievementsScreen
 import com.example.workouttracker.ui.analytics.AnalyticsScreen
 import com.example.workouttracker.ui.articles.ArticlesScreen
@@ -29,9 +27,21 @@ import com.example.workouttracker.viewmodel.AuthViewModel
 import com.example.workouttracker.viewmodel.TrainingViewModel
 import com.example.workouttracker.viewmodel.AchievementViewModel
 import com.example.workouttracker.viewmodel.AchievementViewModelFactory
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+
+
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.foundation.layout.*
+import androidx.compose.ui.graphics.Color
+import androidx.room.util.copy
 
 @Composable
-fun MainScreen(navController: NavController) {
+fun MainScreen(
+    navController: NavController,
+    onToggleTheme: () -> Unit = {}   // ← добавили колбэк, по умолчанию пустой
+) {
     val trainingViewModel: TrainingViewModel = viewModel()
     val context = LocalContext.current
     val application = context.applicationContext as Application
@@ -41,7 +51,6 @@ fun MainScreen(navController: NavController) {
     )
     val authViewModel: AuthViewModel = viewModel()
 
-    // AchievementViewModel
     val achievementViewModel: AchievementViewModel = viewModel(
         factory = AchievementViewModelFactory(trainingViewModel, articleViewModel, application)
     )
@@ -62,9 +71,7 @@ fun MainScreen(navController: NavController) {
             SmoothNavigationBar(
                 items = items,
                 selectedRoute = selectedRoute,
-                onItemSelected = { route ->
-                    selectedRoute = route
-                }
+                onItemSelected = { route -> selectedRoute = route }
             )
         }
     ) { innerPadding ->
@@ -82,10 +89,14 @@ fun MainScreen(navController: NavController) {
                     BottomNavItem.Achieve.route -> AchievementsScreen(
                         achievementViewModel = achievementViewModel
                     )
-                    BottomNavItem.Profile.route -> ProfileScreen(authViewModel) {
-                        authViewModel.logout()
-                        navController.navigate("login") { popUpTo(0) { inclusive = true } }
-                    }
+                    BottomNavItem.Profile.route -> ProfileScreen(
+                        authViewModel = authViewModel,
+                        onLogout = {
+                            authViewModel.logout()
+                            navController.navigate("login") { popUpTo(0) { inclusive = true } }
+                        },
+                        onToggleTheme = onToggleTheme // ← пробросили сюда
+                    )
                 }
             }
         }
@@ -105,7 +116,6 @@ fun SmoothNavigationBar(
     ) {
         items.forEach { item ->
             val selected = selectedRoute == item.route
-
             NavigationBarItem(
                 selected = selected,
                 onClick = { onItemSelected(item.route) },
@@ -129,25 +139,25 @@ fun NavIconWithSmoothAnimation(
     title: String,
     selected: Boolean
 ) {
-    val transition = updateTransition(selected, label = "icon_transition")
+    val cs = MaterialTheme.colorScheme
 
-    val tint by transition.animateColor(
-        transitionSpec = { tween(250) },
-        label = "tint"
-    ) { isSelected ->
-        if (isSelected) MaterialTheme.colorScheme.primary
-        else MaterialTheme.colorScheme.onSurfaceVariant
-    }
+    val tint by animateColorAsState(
+        targetValue = if (selected) cs.primary else cs.onSurfaceVariant,
+        animationSpec = tween(durationMillis = 250),
+        label = "nav_tint"
+    )
 
-    val scale by transition.animateFloat(
-        transitionSpec = { tween(250, easing = FastOutSlowInEasing) },
-        label = "scale"
-    ) { isSelected -> if (isSelected) 1.18f else 1f }
+    val scale by animateFloatAsState(
+        targetValue = if (selected) 1.18f else 1f,
+        animationSpec = tween(durationMillis = 250, easing = FastOutSlowInEasing),
+        label = "nav_scale"
+    )
 
-    val textAlpha by transition.animateFloat(
-        transitionSpec = { tween(200) },
-        label = "text_alpha"
-    ) { isSelected -> if (isSelected) 1f else 0f }
+    val textAlpha by animateFloatAsState(
+        targetValue = if (selected) 1f else 0f,
+        animationSpec = tween(durationMillis = 200),
+        label = "nav_text_alpha"
+    )
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -161,12 +171,11 @@ fun NavIconWithSmoothAnimation(
                 .size(26.dp)
                 .scale(scale)
         )
-
         if (textAlpha > 0f) {
             Text(
                 text = title,
                 style = MaterialTheme.typography.labelSmall,
-                color = tint.copy(alpha = textAlpha),
+                color = tint.copy(alpha = textAlpha),  // ← теперь tint — это Color, copy доступен
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
@@ -176,3 +185,5 @@ fun NavIconWithSmoothAnimation(
         }
     }
 }
+
+
