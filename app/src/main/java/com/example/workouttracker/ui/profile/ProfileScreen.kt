@@ -224,33 +224,83 @@ fun ProfileScreen(
                     }
 
                     ProfileSection(title = "Фигура") {
-                        ProfileFieldRow("Рост (см)", u.height.toString(), Icons.Default.Height) {
-                            fieldToEdit = it; tempText = u.height.toString(); tempError = null
-                        }
-                        ProfileFieldRow("Вес (кг)", u.weight.toString(), Icons.Default.FitnessCenter) {
-                            fieldToEdit = it; tempText = u.weight.toString(); tempError = null
-                        }
-                        ProfileFieldRow("Плечи (см)", u.shoulders.toString(), Icons.Default.Accessibility) {
-                            fieldToEdit = it; tempText = u.shoulders.toString(); tempError = null
-                        }
-                        ProfileFieldRow("Талия (см)", u.waist.toString(), Icons.Default.Accessibility) {
-                            fieldToEdit = it; tempText = u.waist.toString(); tempError = null
-                        }
-                        ProfileFieldRow("Бёдра (см)", u.hips.toString(), Icons.Default.Accessibility) {
-                            fieldToEdit = it; tempText = u.hips.toString(); tempError = null
-                        }
-                        ProfileFieldRow("Грудь (см)", u.chest.toString(), Icons.Default.Accessibility) {
-                            fieldToEdit = it; tempText = u.chest.toString(); tempError = null
-                        }
+                        ProfileFieldRow(
+                            label = "Рост (см)",
+                            value = u.height.toString(),
+                            icon = Icons.Default.Height,
+                            onEditClick = { label ->
+                                fieldToEdit = label
+                                tempText = u.height.toString()
+                                tempError = null
+                            }
+                        )
+
+                        ProfileFieldRow(
+                            label = "Вес (кг)",
+                            value = u.weight.toString(),
+                            icon = Icons.Default.FitnessCenter,
+                            onEditClick = { label ->
+                                fieldToEdit = label
+                                tempText = u.weight.toString()
+                                tempError = null
+                            }
+                        )
+
+                        ProfileFieldRow(
+                            label = "Плечи (см)",
+                            value = u.shoulders.toString(),
+                            icon = Icons.Default.Accessibility,
+                            onEditClick = { label ->
+                                fieldToEdit = label
+                                tempText = u.shoulders.toString()
+                                tempError = null
+                            }
+                        )
+
+                        ProfileFieldRow(
+                            label = "Талия (см)",
+                            value = u.waist.toString(),
+                            icon = Icons.Default.Accessibility,
+                            onEditClick = { label ->
+                                fieldToEdit = label
+                                tempText = u.waist.toString()
+                                tempError = null
+                            }
+                        )
+
+                        ProfileFieldRow(
+                            label = "Бёдра (см)",
+                            value = u.hips.toString(),
+                            icon = Icons.Default.Accessibility,
+                            onEditClick = { label ->
+                                fieldToEdit = label
+                                tempText = u.hips.toString()
+                                tempError = null
+                            }
+                        )
+
+                        ProfileFieldRow(
+                            label = "Грудь (см)",
+                            value = u.chest.toString(),
+                            icon = Icons.Default.Accessibility,
+                            onEditClick = { label ->
+                                fieldToEdit = label
+                                tempText = u.chest.toString()
+                                tempError = null
+                            }
+                        )
+
                         ProfileFieldRow(
                             label = "Дата измерений",
                             value = u.measurementDate,
                             icon = Icons.Default.CalendarToday,
-                            onEditClick = { /* не через текст — только календарь */ },
                             isDate = true,
-                            onDateClick = { showDatePickerFor = it }
+                            onDateClick = { label ->
+                                showDatePickerFor = label
+                            }
                         )
                     }
+
 
                     ProfileSection(title = "Цели") {
                         ProfileFieldRow("Цель", u.goalName, Icons.Default.Flag) {
