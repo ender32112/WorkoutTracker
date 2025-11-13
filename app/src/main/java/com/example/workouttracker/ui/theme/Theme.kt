@@ -1,32 +1,34 @@
 package com.example.workouttracker.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.material3.*
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.composed
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.Modifier
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.ui.composed
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 
 /* =================== Переключаемые варианты темы =================== */
 enum class ThemeVariant {
-    /** Следовать системной: light/dark */
-    SYSTEM,
-    LIGHT,
-    DARK,
-    WARM,      // тёплая (коричневые тона)
-    FUCHSIA    // фуксия/фиолетовые акценты
+    DARK,          // 1. Тёмная
+    LIGHT,         // 2. Светлая
+    BROWN,         // 3. Коричневая
+    FUCHSIA,       // 4. Фуксия
+    GREEN,         // 5. Зелёная
+    BLUE_PURPLE,   // 6. Сине-фиолетовая
+    AURORA         // 7. Особенная неоновая тема
 }
 
-/* =================== COLOR SCHEMES =================== */
+/* =================== БАЗОВЫЕ СХЕМЫ LIGHT / DARK =================== */
 
-/* Light / Dark (стандарт) */
 private val LightColorScheme = lightColorScheme(
     primary = LightPrimary,
     onPrimary = LightOnPrimary,
@@ -43,6 +45,7 @@ private val LightColorScheme = lightColorScheme(
     error = LightError,
     onError = LightOnError
 )
+
 private val DarkColorScheme = darkColorScheme(
     primary = DarkPrimary,
     onPrimary = DarkOnPrimary,
@@ -60,8 +63,10 @@ private val DarkColorScheme = darkColorScheme(
     onError = DarkOnError
 )
 
-/* Warm */
-private val WarmLightScheme = lightColorScheme(
+/* =================== КОРИЧНЕВАЯ (BROWN) =================== */
+// Используем твои Warm-палитры как коричневую
+
+private val BrownLightScheme = lightColorScheme(
     primary = WarmLightPrimary,
     onPrimary = WarmLightOnPrimary,
     primaryContainer = WarmLightPrimaryContainer,
@@ -77,7 +82,8 @@ private val WarmLightScheme = lightColorScheme(
     error = WarmLightError,
     onError = WarmLightOnError
 )
-private val WarmDarkScheme = darkColorScheme(
+
+private val BrownDarkScheme = darkColorScheme(
     primary = WarmDarkPrimary,
     onPrimary = WarmDarkOnPrimary,
     primaryContainer = WarmDarkPrimaryContainer,
@@ -94,7 +100,8 @@ private val WarmDarkScheme = darkColorScheme(
     onError = WarmDarkOnError
 )
 
-/* Fuchsia */
+/* =================== ФУКСИЯ =================== */
+
 private val FuchsiaLightScheme = lightColorScheme(
     primary = FuchsiaLightPrimary,
     onPrimary = FuchsiaLightOnPrimary,
@@ -111,6 +118,7 @@ private val FuchsiaLightScheme = lightColorScheme(
     error = FuchsiaLightError,
     onError = FuchsiaLightOnError
 )
+
 private val FuchsiaDarkScheme = darkColorScheme(
     primary = FuchsiaDarkPrimary,
     onPrimary = FuchsiaDarkOnPrimary,
@@ -128,7 +136,115 @@ private val FuchsiaDarkScheme = darkColorScheme(
     onError = FuchsiaDarkOnError
 )
 
-/* =================== Градиенты иElevation =================== */
+/* =================== ЗЕЛЁНАЯ =================== */
+
+private val GreenLightScheme = lightColorScheme(
+    primary = GreenLightPrimary,
+    onPrimary = GreenLightOnPrimary,
+    primaryContainer = GreenLightPrimaryContainer,
+    onPrimaryContainer = GreenLightOnPrimaryContainer,
+    secondary = GreenLightSecondary,
+    onSecondary = GreenLightOnSecondary,
+    background = GreenLightBackground,
+    onBackground = GreenLightOnSurface,
+    surface = GreenLightSurface,
+    onSurface = GreenLightOnSurface,
+    surfaceVariant = GreenLightSurfaceVariant,
+    outline = GreenLightOutline,
+    error = GreenLightError,
+    onError = GreenLightOnError
+)
+
+private val GreenDarkScheme = darkColorScheme(
+    primary = GreenDarkPrimary,
+    onPrimary = GreenDarkOnPrimary,
+    primaryContainer = GreenDarkPrimaryContainer,
+    onPrimaryContainer = GreenDarkOnPrimaryContainer,
+    secondary = GreenDarkSecondary,
+    onSecondary = GreenDarkOnSecondary,
+    background = GreenDarkBackground,
+    onBackground = GreenDarkOnSurface,
+    surface = GreenDarkSurface,
+    onSurface = GreenDarkOnSurface,
+    surfaceVariant = GreenDarkSurfaceVariant,
+    outline = GreenDarkOutline,
+    error = GreenDarkError,
+    onError = GreenDarkOnError
+)
+
+/* =================== СИНЕ-ФИОЛЕТОВАЯ =================== */
+
+private val BluePurpleLightScheme = lightColorScheme(
+    primary = BluePurpleLightPrimary,
+    onPrimary = BluePurpleLightOnPrimary,
+    primaryContainer = BluePurpleLightPrimaryContainer,
+    onPrimaryContainer = BluePurpleLightOnPrimaryContainer,
+    secondary = BluePurpleLightSecondary,
+    onSecondary = BluePurpleLightOnSecondary,
+    background = BluePurpleLightBackground,
+    onBackground = BluePurpleLightOnSurface,
+    surface = BluePurpleLightSurface,
+    onSurface = BluePurpleLightOnSurface,
+    surfaceVariant = BluePurpleLightSurfaceVariant,
+    outline = BluePurpleLightOutline,
+    error = BluePurpleLightError,
+    onError = BluePurpleLightOnError
+)
+
+private val BluePurpleDarkScheme = darkColorScheme(
+    primary = BluePurpleDarkPrimary,
+    onPrimary = BluePurpleDarkOnPrimary,
+    primaryContainer = BluePurpleDarkPrimaryContainer,
+    onPrimaryContainer = BluePurpleDarkOnPrimaryContainer,
+    secondary = BluePurpleDarkSecondary,
+    onSecondary = BluePurpleDarkOnSecondary,
+    background = BluePurpleDarkBackground,
+    onBackground = BluePurpleDarkOnSurface,
+    surface = BluePurpleDarkSurface,
+    onSurface = BluePurpleDarkOnSurface,
+    surfaceVariant = BluePurpleDarkSurfaceVariant,
+    outline = BluePurpleDarkOutline,
+    error = BluePurpleDarkError,
+    onError = BluePurpleDarkOnError
+)
+
+/* =================== AURORA (особенная неоновая) =================== */
+
+private val AuroraLightScheme = lightColorScheme(
+    primary = AuroraLightPrimary,
+    onPrimary = AuroraLightOnPrimary,
+    primaryContainer = AuroraLightPrimaryContainer,
+    onPrimaryContainer = AuroraLightOnPrimaryContainer,
+    secondary = AuroraLightSecondary,
+    onSecondary = AuroraLightOnSecondary,
+    background = AuroraLightBackground,
+    onBackground = AuroraLightOnSurface,
+    surface = AuroraLightSurface,
+    onSurface = AuroraLightOnSurface,
+    surfaceVariant = AuroraLightSurfaceVariant,
+    outline = AuroraLightOutline,
+    error = AuroraLightError,
+    onError = AuroraLightOnError
+)
+
+private val AuroraDarkScheme = darkColorScheme(
+    primary = AuroraDarkPrimary,
+    onPrimary = AuroraDarkOnPrimary,
+    primaryContainer = AuroraDarkPrimaryContainer,
+    onPrimaryContainer = AuroraDarkOnPrimaryContainer,
+    secondary = AuroraDarkSecondary,
+    onSecondary = AuroraDarkOnSecondary,
+    background = AuroraDarkBackground,
+    onBackground = AuroraDarkOnSurface,
+    surface = AuroraDarkSurface,
+    onSurface = AuroraDarkOnSurface,
+    surfaceVariant = AuroraDarkSurfaceVariant,
+    outline = AuroraDarkOutline,
+    error = AuroraDarkError,
+    onError = AuroraDarkOnError
+)
+
+/* =================== Градиенты и Elevation =================== */
 
 val MaterialTheme.gradientPrimary: Brush
     @Composable
@@ -150,16 +266,24 @@ object AppElevation {
 
 @Composable
 fun WorkoutTrackerTheme(
-    variant: ThemeVariant = ThemeVariant.SYSTEM,
+    variant: ThemeVariant = ThemeVariant.DARK,
     content: @Composable () -> Unit
 ) {
     val isSystemDark = isSystemInDarkTheme()
+
     val colorScheme = when (variant) {
-        ThemeVariant.SYSTEM -> if (isSystemDark) DarkColorScheme else LightColorScheme
-        ThemeVariant.LIGHT  -> LightColorScheme
-        ThemeVariant.DARK   -> DarkColorScheme
-        ThemeVariant.WARM   -> if (isSystemDark) WarmDarkScheme else WarmLightScheme
-        ThemeVariant.FUCHSIA-> if (isSystemDark) FuchsiaDarkScheme else FuchsiaLightScheme
+        ThemeVariant.DARK -> DarkColorScheme
+        ThemeVariant.LIGHT -> LightColorScheme
+        ThemeVariant.BROWN ->
+            if (isSystemDark) BrownDarkScheme else BrownLightScheme
+        ThemeVariant.FUCHSIA ->
+            if (isSystemDark) FuchsiaDarkScheme else FuchsiaLightScheme
+        ThemeVariant.GREEN ->
+            if (isSystemDark) GreenDarkScheme else GreenLightScheme
+        ThemeVariant.BLUE_PURPLE ->
+            if (isSystemDark) BluePurpleDarkScheme else BluePurpleLightScheme
+        ThemeVariant.AURORA ->
+            if (isSystemDark) AuroraDarkScheme else AuroraLightScheme
     }
 
     MaterialTheme(
@@ -171,6 +295,7 @@ fun WorkoutTrackerTheme(
 }
 
 /* =================== Глобальные модификаторы =================== */
+
 fun Modifier.cardStyle(): Modifier = composed {
     this
         .fillMaxWidth()
@@ -194,4 +319,3 @@ fun Modifier.fabStyle(): Modifier = composed {
         .shadow(AppElevation.fab, AppShapes.extraLarge)
         .clip(AppShapes.extraLarge)
 }
-
