@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.graphics.BitmapFactory
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.hardware.Sensor
@@ -101,11 +102,12 @@ fun AnalyticsScreen(
     val scope = rememberCoroutineScope()
     val prefs: SharedPreferences = context.getSharedPreferences("analytics_prefs", Context.MODE_PRIVATE)
 
-    // ---- Keys
-    val K_DAY_KEY = "steps_day_key"
-    val K_COUNTER_BASELINE = "steps_counter_base"
-    val K_COUNTER_LAST_SEEN = "steps_counter_last"
-    val K_STEPS_TODAY = "steps_today"
+    // ---- Keys ----
+    val K_TODAY_DATE = "steps_today_date"      // дата, для которой считаем stepsToday
+    val K_LAST_RAW = "steps_last_raw"         // последнее "сырое" значение датчика
+    val K_LAST_TS = "steps_last_ts"           // время последнего события датчика
+    val K_STEPS_TODAY = "steps_today"         // накопленные шаги за сегодня
+
     val K_WEATHER_JSON = "weather_cache_json"
     val K_WEATHER_TIME = "weather_cache_time"
     val K_CITY = "weather_city"
@@ -114,6 +116,12 @@ fun AnalyticsScreen(
     val K_NOTIFY_ENABLED = "notify_steps_enabled"
     val K_GOAL_SENT_FOR_DAY = "goal_sent_day"
     val K_BEST_EX_LIMIT = "best_ex_limit"
+    val K_LAST_GOAL_NOTIFIED = "steps_last_goal_notified"
+    val K_LAST_NOTIFY_DAY = "steps_last_notify_day"
+
+
+
+
 
     fun todayKeyIso(): String = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
     fun todayPrettyShort(): String = SimpleDateFormat("dd.MM", Locale.getDefault()).format(Date())
@@ -157,58 +165,115 @@ fun AnalyticsScreen(
     val snackbarHost = remember { SnackbarHostState() }
     suspend fun showSnack(msg: String) { snackbarHost.showSnackbar(msg) }
 
-    /* ---------- Sensors: Steps ---------- */
-    var stepsToday by remember { mutableStateOf(prefs.getLong(K_STEPS_TODAY, 0L)) }
-    val sensorManager = remember { context.getSystemService(Context.SENSOR_SERVICE) as SensorManager }
-    val stepSensor = remember { sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER) }
+    /* ---------- Sensors: Steps (дельты вместо baseline) ---------- */
+
+    // текущие шаги за сегодня берём из prefs, но дата может быть старой
+    var stepsToday by remember {
+        mutableStateOf(prefs.getLong(K_STEPS_TODAY, 0L))
+    }
+
+    val sensorManager = remember {
+        context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+    }
+    val stepSensor = remember {
+        sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
+    }
+
+    fun todayIso(): String =
+        SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
 
     val stepListener = remember(prefs) {
         object : SensorEventListener {
             override fun onSensorChanged(event: SensorEvent) {
                 if (event.sensor.type != Sensor.TYPE_STEP_COUNTER) return
-                val current = event.values[0].toLong()
-                val day = todayKeyIso()
-                val savedDay = prefs.getString(K_DAY_KEY, null)
-                val lastSeen = prefs.getLong(K_COUNTER_LAST_SEEN, -1L)
-                var base = prefs.getLong(K_COUNTER_BASELINE, -1L)
 
-                if (savedDay == null || savedDay != day) {
-                    val newBase = if (lastSeen >= 0L) lastSeen else current
+                val raw = event.values[0].toLong()
+                val now = System.currentTimeMillis()
+                val today = todayIso()
+
+                val lastRaw = prefs.getLong(K_LAST_RAW, -1L)
+                val lastTs = prefs.getLong(K_LAST_TS, -1L)
+                val storedDate = prefs.getString(K_TODAY_DATE, today) ?: today
+                var todaySteps = prefs.getLong(K_STEPS_TODAY, 0L)
+
+                // 1) Первый запуск — просто запоминаем сырое значение, не считаем дельту
+                if (lastRaw < 0L || lastTs < 0L) {
                     prefs.edit()
-                        .putString(K_DAY_KEY, day)
-                        .putLong(K_COUNTER_BASELINE, newBase)
+                        .putLong(K_LAST_RAW, raw)
+                        .putLong(K_LAST_TS, now)
+                        .putString(K_TODAY_DATE, today)
                         .apply()
-                    base = newBase
-                    prefs.edit().putString(K_GOAL_SENT_FOR_DAY, null).apply()
+                    stepsToday = todaySteps
+                    return
                 }
 
-                if (lastSeen >= 0L && current < lastSeen) {
-                    prefs.edit().putLong(K_COUNTER_BASELINE, current).apply()
-                    base = current
+                // 2) Если системный счётчик "отмотался назад" (перезагрузка устройства) —
+                //    считаем, что всё начинается с нуля, дельту не добавляем
+                var delta = raw - lastRaw
+                if (delta < 0L) {
+                    delta = 0L
                 }
 
-                if (base < 0L) {
-                    prefs.edit().putLong(K_COUNTER_BASELINE, current).apply()
-                    stepsToday = 0L
+                // 3) Если день поменялся — начинаем новый дневной счётчик
+                val effectiveDate: String
+                if (storedDate != today) {
+                    // старые накопленные шаги остаются в prefs, но сегодня — с нуля
+                    todaySteps = 0L
+                    effectiveDate = today
                 } else {
-                    val calc = (current - base).coerceAtLeast(0L)
-                    stepsToday = calc
-                    prefs.edit().putLong(K_STEPS_TODAY, calc).apply()
+                    effectiveDate = storedDate
                 }
-                prefs.edit().putLong(K_COUNTER_LAST_SEEN, current).apply()
+
+                // 4) Прибавляем дельту к шагам за сегодняшний день
+                todaySteps = (todaySteps + delta).coerceAtLeast(0L)
+
+                // 5) Обновляем состояние и сохраняем всё в prefs
+                stepsToday = todaySteps
+                prefs.edit()
+                    .putLong(K_STEPS_TODAY, todaySteps)
+                    .putString(K_TODAY_DATE, effectiveDate)
+                    .putLong(K_LAST_RAW, raw)
+                    .putLong(K_LAST_TS, now)
+                    .apply()
+
+                // ---- Уведомление о цели (использует stepsToday) ----
+                val lastGoalNotified = prefs.getInt(K_LAST_GOAL_NOTIFIED, -1)
+                val lastNotifyDay = prefs.getString(K_LAST_NOTIFY_DAY, "")
+
+                val reached = stepsToday >= stepGoal
+                val notSentForThisGoalToday =
+                    (lastGoalNotified != stepGoal || lastNotifyDay != today)
+
+                if (notifyStepsEnabled && reached && notSentForThisGoalToday) {
+                    showStepGoalNotification(context, stepGoal, stepsToday)
+
+                    prefs.edit()
+                        .putInt(K_LAST_GOAL_NOTIFIED, stepGoal)
+                        .putString(K_LAST_NOTIFY_DAY, today)
+                        .apply()
+                }
             }
+
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
         }
     }
 
     LaunchedEffect(hasStepPermission, stepSensor) {
         if (hasStepPermission && stepSensor != null) {
-            sensorManager.registerListener(stepListener, stepSensor, SensorManager.SENSOR_DELAY_NORMAL)
+            sensorManager.registerListener(
+                stepListener,
+                stepSensor,
+                SensorManager.SENSOR_DELAY_NORMAL
+            )
         }
     }
+
     DisposableEffect(hasStepPermission, stepSensor) {
-        onDispose { sensorManager.unregisterListener(stepListener) }
+        onDispose {
+            sensorManager.unregisterListener(stepListener)
+        }
     }
+
 
     /* ---------- Notifications ---------- */
     fun ensureNotifChannel() {
@@ -226,22 +291,37 @@ fun AnalyticsScreen(
     fun sendGoalNotificationIfNeeded() {
         if (!notifyStepsEnabled) return
         if (!hasNotifPermission) return
+
         val day = todayKeyIso()
-        val sentForDay = prefs.getString(K_GOAL_SENT_FOR_DAY, null)
-        if (sentForDay == day) return
-        if (stepsToday >= stepGoal) {
+        val lastGoalNotified = prefs.getInt(K_LAST_GOAL_NOTIFIED, -1)
+        val lastNotifyDay = prefs.getString(K_LAST_NOTIFY_DAY, "")
+
+        val reached = stepsToday >= stepGoal
+        val notSentForThisGoalToday = (lastGoalNotified != stepGoal || lastNotifyDay != day)
+
+        if (reached && notSentForThisGoalToday) {
             ensureNotifChannel()
             val notif = NotificationCompat.Builder(context, NOTIF_CHANNEL_ID)
-                .setSmallIcon(R.mipmap.ic_launcher)
+                .setSmallIcon(R.drawable.ic_notification_logo) // ← small (монохромная)
+                .setLargeIcon(BitmapFactory.decodeResource(context.resources, R.mipmap.ic_launcher_round)) // ← large (иконка приложения)
                 .setContentTitle("Цель достигнута 🎉")
                 .setContentText("Вы прошли $stepsToday шагов из $stepGoal. Отличная работа!")
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                 .setAutoCancel(true)
                 .build()
+
+
+
             NotificationManagerCompat.from(context).notify(NOTIF_ID_GOAL, notif)
-            prefs.edit().putString(K_GOAL_SENT_FOR_DAY, day).apply()
+
+            // фиксируем факт отправки уведомления для конкретной цели в этот день
+            prefs.edit()
+                .putInt(K_LAST_GOAL_NOTIFIED, stepGoal)
+                .putString(K_LAST_NOTIFY_DAY, day)
+                .apply()
         }
     }
+
 
     LaunchedEffect(notifyStepsEnabled) {
         if (notifyStepsEnabled && Build.VERSION.SDK_INT >= 33 && !hasNotifPermission) {
@@ -501,22 +581,33 @@ fun AnalyticsScreen(
             bestLimit = bestExercisesLimit,
             onSave = { newCity, newGoal, notify, bestLimitNew ->
                 val c = newCity.trim().ifBlank { "Москва" }
-                val g = newGoal.toIntOrNull()?.coerceIn(1000, 50000) ?: 8000
+                val g = newGoal.toIntOrNull()?.coerceIn(1_000, 50_000) ?: 8_000
                 val bl = bestLimitNew.coerceIn(1, 10)
+
+                // ключ «сегодня» для сброса статуса уведомления (если храните его по дням)
+                fun todayKey(): String =
+                    java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
+
                 prefs.edit()
                     .putString(K_CITY, c)
                     .putInt(K_STEP_GOAL, g)
                     .putBoolean(K_NOTIFY_ENABLED, notify)
                     .putInt(K_BEST_EX_LIMIT, bl)
+                    // СБРОС статуса уведомления, чтобы новая цель могла сработать снова
+                    .remove(K_LAST_GOAL_NOTIFIED)          // <- последний уведомлённый goal
+                    .putString(K_LAST_NOTIFY_DAY, todayKey()) // <- фиксируем текущий день (опционально)
                     .apply()
+
                 city = c
                 stepGoal = g
                 notifyStepsEnabled = notify
                 bestExercisesLimit = bl
+
                 scope.launch { fetchAndCacheWeather(c) }
                 showSettings = false
                 scope.launch { showSnack("Настройки сохранены") }
             },
+
             onRefreshWeather = { scope.launch { fetchAndCacheWeather(city) } },
             onDismiss = { showSettings = false }
         )
@@ -1294,4 +1385,53 @@ fun EditWeightHistoryDialogPretty(
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
     )
 }
+
+
+private fun showStepGoalNotification(context: Context, goal: Int, steps: Long) {
+    val channelId = "steps_goal_channel"
+    val channelName = "Цели по шагам"
+
+    // Канал (Android 8+)
+    val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+        val channel = android.app.NotificationChannel(
+            channelId, channelName, android.app.NotificationManager.IMPORTANCE_DEFAULT
+        ).apply { description = "Уведомления о достижении дневной цели по шагам" }
+        nm.createNotificationChannel(channel)
+    }
+
+    // Разрешение для Android 13+
+    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+        val granted = androidx.core.content.ContextCompat.checkSelfPermission(
+            context, android.Manifest.permission.POST_NOTIFICATIONS
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (!granted) return
+    }
+
+    // ▸ small icon — обязательна, монохромная
+    val smallIcon = R.drawable.ic_notification_logo
+
+    // ▸ large icon — покажем иконку приложения (необязательно, но красиво)
+    val large = android.graphics.BitmapFactory.decodeResource(
+        context.resources,
+        // возьми круглую, если она есть; можно и обычную
+        com.example.workouttracker.R.mipmap.ic_launcher_round
+    )
+
+    val title = "Цель достигнута!"
+    val text = "Вы прошли $steps шагов из цели $goal"
+
+    val builder = androidx.core.app.NotificationCompat.Builder(context, channelId)
+        .setSmallIcon(smallIcon)                   // ← наша монохромная иконка
+        .setLargeIcon(large)                       // ← иконка приложения
+        .setContentTitle(title)
+        .setContentText(text)
+        .setStyle(androidx.core.app.NotificationCompat.BigTextStyle().bigText(text))
+        .setAutoCancel(true)
+        .setPriority(androidx.core.app.NotificationCompat.PRIORITY_DEFAULT)
+
+    androidx.core.app.NotificationManagerCompat.from(context).notify(1001, builder.build())
+}
+
+
 
