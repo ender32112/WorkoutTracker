@@ -62,6 +62,7 @@ class MainActivity : ComponentActivity() {
 
                     WorkoutNavGraph(
                         navController = navController,
+                        currentTheme = themeVariant,   // ← ВАЖНО: пробрасываем вниз
                         onToggleTheme = toggleTheme
                     )
                 }
