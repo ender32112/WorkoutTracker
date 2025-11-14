@@ -7,15 +7,16 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import androidx.navigation.compose.rememberNavController
 import com.example.workouttracker.ui.auth.LoginScreen
 import com.example.workouttracker.ui.auth.RegistrationScreen
+import com.example.workouttracker.ui.theme.ThemeVariant
 import com.example.workouttracker.viewmodel.AuthViewModel
 
 @Composable
 fun WorkoutNavGraph(
-    navController: NavHostController = rememberNavController(),
-    onToggleTheme: () -> Unit = {}   // ← добавили параметр для переключения темы
+    navController: NavHostController,
+    currentTheme: ThemeVariant,          // ← НОВЫЙ параметр
+    onToggleTheme: () -> Unit = {}       // уже был
 ) {
     val authViewModel: AuthViewModel = viewModel()
     val isLoggedIn by authViewModel.isLoggedIn.collectAsState()
@@ -51,7 +52,8 @@ fun WorkoutNavGraph(
         composable("main") {
             MainScreen(
                 navController = navController,
-                onToggleTheme = onToggleTheme   // ← пробрасываем дальше в профиль
+                currentTheme = currentTheme,      // ← пробрасываем дальше
+                onToggleTheme = onToggleTheme
             )
         }
     }

@@ -34,12 +34,14 @@ import androidx.compose.animation.core.tween
 
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.layout.*
+import com.example.workouttracker.ui.theme.ThemeVariant
 import androidx.compose.ui.graphics.Color
 import androidx.room.util.copy
 
 @Composable
 fun MainScreen(
     navController: NavController,
+    currentTheme: ThemeVariant,
     onToggleTheme: () -> Unit = {}   // ← добавили колбэк, по умолчанию пустой
 ) {
     val trainingViewModel: TrainingViewModel = viewModel()
@@ -95,7 +97,8 @@ fun MainScreen(
                             authViewModel.logout()
                             navController.navigate("login") { popUpTo(0) { inclusive = true } }
                         },
-                        onToggleTheme = onToggleTheme // ← пробросили сюда
+                        onToggleTheme = onToggleTheme, // ← пробросили сюда
+                        currentTheme = currentTheme
                     )
                 }
             }
