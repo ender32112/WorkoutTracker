@@ -12,12 +12,16 @@ android {
 
     defaultConfig {
         applicationId = "com.example.workouttracker"
-        minSdk = 21
+        minSdk = 23
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        vectorDrawables {
+            useSupportLibrary = true
+        }
     }
 
     buildTypes {
@@ -56,6 +60,9 @@ dependencies {
     implementation(libs.firebase.crashlytics.buildtools)
     implementation(libs.androidx.navigation.runtime.ktx)
     implementation(libs.androidx.compose.animation.core)
+    implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.compose.foundation.layout)
+    implementation(libs.androidx.room.ktx)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -74,6 +81,8 @@ dependencies {
 
     // Material 3
     implementation("androidx.compose.material3:material3:1.3.2")
+
+    implementation("androidx.compose.material3:material3-window-size-class:1.2.1")
 
     // Material 3 Icons
     implementation("androidx.compose.material:material-icons-core:1.4.3")
@@ -98,5 +107,9 @@ dependencies {
     // (можно опционально оставить для отладки)
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+
+    implementation("androidx.compose.runtime:runtime-saveable")
+
+    implementation("androidx.health.connect:connect-client:1.1.0-alpha04")
 
 }
