@@ -22,7 +22,9 @@ class ArticleViewModel(
     application: Application
 ) : AndroidViewModel(application) {
 
-    private val prefs = application.getSharedPreferences("article_prefs", Context.MODE_PRIVATE)
+    private val authPrefs = application.getSharedPreferences(AuthViewModel.AUTH_PREFS_NAME, Context.MODE_PRIVATE)
+    private val userId = authPrefs.getString(AuthViewModel.KEY_CURRENT_USER_ID, null) ?: "guest"
+    private val prefs = application.getSharedPreferences("article_prefs_" + userId, Context.MODE_PRIVATE)
 
     private val _articles = MutableStateFlow<List<Article>>(emptyList())
     val articles: StateFlow<List<Article>> = _articles

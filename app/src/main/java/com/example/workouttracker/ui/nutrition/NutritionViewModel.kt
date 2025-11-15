@@ -12,7 +12,9 @@ import java.util.UUID
 
 class NutritionViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val prefs = application.getSharedPreferences("nutrition_prefs", Context.MODE_PRIVATE)
+    private val authPrefs = application.getSharedPreferences(AuthViewModel.AUTH_PREFS_NAME, Context.MODE_PRIVATE)
+    private val userId = authPrefs.getString(AuthViewModel.KEY_CURRENT_USER_ID, null) ?: "guest"
+    private val prefs = application.getSharedPreferences("nutrition_prefs_" + userId, Context.MODE_PRIVATE)
     private val _entries = MutableStateFlow<List<NutritionEntry>>(emptyList())
     val entries: StateFlow<List<NutritionEntry>> = _entries
 

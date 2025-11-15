@@ -26,9 +26,13 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.rememberAsyncImagePainter
 import com.example.workouttracker.ui.components.SectionHeader
+import com.example.workouttracker.ui.theme.ThemeVariant
+import com.example.workouttracker.ui.theme.icon
+import com.example.workouttracker.ui.theme.displayName
 import com.example.workouttracker.viewmodel.AuthViewModel
 import com.example.workouttracker.viewmodel.User
 import java.io.File
@@ -42,10 +46,12 @@ import java.util.Calendar
 fun ProfileScreen(
     authViewModel: AuthViewModel,
     onLogout: () -> Unit,
-    onToggleTheme: () -> Unit = {} // ← колбэк смены темы
+    onToggleTheme: () -> Unit = {}, // ← колбэк смены темы
+    currentTheme: ThemeVariant
 ) {
     val context = LocalContext.current
     val user by authViewModel.userState.collectAsState()
+    val authError by authViewModel.authError.collectAsState()
     var editableUser by remember(user) { mutableStateOf(user) }
 
     // Диалог редактирования конкретного поля
@@ -57,6 +63,14 @@ fun ProfileScreen(
     var showDatePickerFor by remember { mutableStateOf<String?>(null) }
 
     val scroll = rememberScrollState()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(authError) {
+        authError?.let {
+            snackbarHostState.showSnackbar(it)
+            authViewModel.clearAuthError()
+        }
+    }
 
     /* ---------- Аватар: копирование в internal storage ---------- */
     fun saveAvatarToInternalStorage(uri: Uri): String? =
@@ -84,20 +98,33 @@ fun ProfileScreen(
 
     /* ---------- UI ---------- */
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             SectionHeader(
                 title = "Профиль",
                 titleStyle = MaterialTheme.typography.headlineSmall,
                 actions = {
                     // Смена темы
-                    FilledTonalButton(
+                    AssistChip(
                         onClick = onToggleTheme,
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
-                    ) {
-                        Icon(Icons.Default.LightMode, contentDescription = null)
-                        Spacer(Modifier.width(6.dp))
-                        Text("Тема")
-                    }
+                        label = {
+                            Text(
+                                text = currentTheme.displayName(),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.labelMedium,
+                                modifier = Modifier.widthIn(max = 120.dp) // ограничиваем ширину, чтобы не заезжало на заголовок
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = currentTheme.icon(),
+                                contentDescription = "Текущая тема"
+                            )
+                        }
+                    )
+
+
                     Spacer(Modifier.width(8.dp))
                     // Выход
                     OutlinedButton(
