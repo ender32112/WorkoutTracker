@@ -2,6 +2,31 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Разрешения для шагомера и сервиса -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- Для Android 14+/34+: специализированный тип foreground-сервиса -->
+    <uses-permission
+        android:name="android.permission.FOREGROUND_SERVICE_HEALTH"
+        tools:targetApi="34" />
+
+    <!-- Нужен BootReceiver'у -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Health Connect -->
+    <uses-permission android:name="android.permission.health.READ_STEPS" />
+    <uses-permission android:name="android.permission.health.WRITE_WEIGHT" />
+    <queries>
+        <package android:name="com.google.android.apps.healthdata" />
+    </queries>
+
+    <!-- Локация (можно оставить одну пару, у тебя дубли) -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -12,6 +37,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.WorkoutTracker"
         tools:targetApi="31">
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -19,10 +45,31 @@
             android:theme="@style/Theme.WorkoutTracker">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 👇 Foreground-сервис подсчёта шагов -->
+        <service
+            android:name=".ui.analytics.StepCounterService"
+            android:exported="false"
+            android:foregroundServiceType="health" />
+
+        <!-- 👇 Ресивер сброса в полночь -->
+        <receiver
+            android:name=".ui.analytics.MidnightResetReceiver"
+            android:exported="false" />
+
+        <!-- 👇 Ресивер автозапуска после перезагрузки -->
+        <receiver
+            android:name=".ui.analytics.BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
 </manifest>

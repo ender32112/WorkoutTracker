@@ -8,12 +8,12 @@ plugins {
 
 android {
     namespace = "com.example.workouttracker"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.example.workouttracker"
-        minSdk = 23
-        targetSdk = 35
+        minSdk = 26
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0"
 
@@ -110,8 +110,12 @@ dependencies {
 
     implementation("androidx.compose.runtime:runtime-saveable")
 
-    implementation("androidx.health.connect:connect-client:1.1.0-alpha04")
     implementation("com.google.android.gms:play-services-fitness:21.1.0")
     implementation("com.google.android.gms:play-services-auth:21.2.0")
+
+    implementation("androidx.localbroadcastmanager:localbroadcastmanager:1.1.0")
+    implementation("androidx.health.connect:connect-client:1.2.0-alpha02")
+
+
 
 }
