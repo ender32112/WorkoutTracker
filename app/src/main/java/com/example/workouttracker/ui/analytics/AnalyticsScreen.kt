@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.AlarmManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.widget.RemoteViews
 import android.app.PendingIntent
 import android.app.Service
 import android.content.BroadcastReceiver
@@ -64,7 +65,6 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import com.example.workouttracker.R
 import com.example.workouttracker.ui.components.SectionHeader
 import com.example.workouttracker.ui.nutrition.NutritionEntry
@@ -90,8 +90,10 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.ceil
 import kotlin.coroutines.resume
-
+import android.app.Notification
+import com.example.workouttracker.MainActivity
 import android.annotation.SuppressLint
+import android.util.Log
 import androidx.compose.material3.AssistChip
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -129,6 +131,9 @@ private fun userAnalyticsPrefs(context: Context): SharedPreferences {
     return context.getSharedPreferences("analytics_prefs_" + userId, Context.MODE_PRIVATE)
 }
 
+private fun todayIso(): String =
+    SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+
 /* ===================== Analytics Screen ===================== */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -162,6 +167,9 @@ fun AnalyticsScreen(
     fun todayPrettyShort(): String = SimpleDateFormat("dd.MM", Locale.getDefault()).format(Date())
     fun timePretty(ts: Long): String = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(ts))
 
+
+
+
     /* ---------- Permissions ---------- */
     var hasStepPermission by remember {
         mutableStateOf(
@@ -170,12 +178,21 @@ fun AnalyticsScreen(
             ) == PackageManager.PERMISSION_GRANTED
         )
     }
+
     val stepPermLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         hasStepPermission = granted
         prefs.edit().putBoolean("step_permission", granted).apply()
         if (granted) {
+            val serviceIntent = Intent(context, StepCounterService::class.java)
+            ContextCompat.startForegroundService(context, serviceIntent)
+        }
+    }
+
+// 🔥 ВАЖНО: автостарт сервиса, если разрешение уже есть
+    LaunchedEffect(hasStepPermission) {
+        if (hasStepPermission) {
             val serviceIntent = Intent(context, StepCounterService::class.java)
             ContextCompat.startForegroundService(context, serviceIntent)
         }
@@ -190,12 +207,25 @@ fun AnalyticsScreen(
             else true
         )
     }
+
     val notifPermLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted -> hasNotifPermission = granted }
 
     val fusedLocationClient = remember(context) { LocationServices.getFusedLocationProviderClient(context) }
     var detectingCity by remember { mutableStateOf(false) }
+
+
+
+    /* ---------- Settings state ---------- */
+    var stepGoal by rememberSaveable { mutableStateOf(prefs.getInt(K_STEP_GOAL, 8000)) }
+    var city by rememberSaveable { mutableStateOf(prefs.getString(K_CITY, "Москва") ?: "Москва") }
+    var notifyStepsEnabled by rememberSaveable { mutableStateOf(prefs.getBoolean(K_NOTIFY_ENABLED, true)) }
+    var bestExercisesLimit by rememberSaveable { mutableStateOf(prefs.getInt(K_BEST_EX_LIMIT, 5).coerceIn(1, 10)) }
+
+    /* ---------- Snackbar ---------- */
+    val snackbarHost = remember { SnackbarHostState() }
+    suspend fun showSnack(msg: String) { snackbarHost.showSnackbar(msg) }
 
     fun launchCityDetection() {
         if (detectingCity) return
@@ -248,43 +278,34 @@ fun AnalyticsScreen(
         }
     }
 
-    /* ---------- Settings state ---------- */
-    var stepGoal by rememberSaveable { mutableStateOf(prefs.getInt(K_STEP_GOAL, 8000)) }
-    var city by rememberSaveable { mutableStateOf(prefs.getString(K_CITY, "Москва") ?: "Москва") }
-    var notifyStepsEnabled by rememberSaveable { mutableStateOf(prefs.getBoolean(K_NOTIFY_ENABLED, true)) }
-    var bestExercisesLimit by rememberSaveable { mutableStateOf(prefs.getInt(K_BEST_EX_LIMIT, 5).coerceIn(1, 10)) }
-
-    /* ---------- Snackbar ---------- */
-    val snackbarHost = remember { SnackbarHostState() }
-    suspend fun showSnack(msg: String) { snackbarHost.showSnackbar(msg) }
-
     /* ---------- Steps state ---------- */
     var stepsToday by remember {
         mutableStateOf(prefs.getLong(K_STEPS_TODAY, 0L))
     }
 
     /* ---------- Realtime updates via broadcast ---------- */
+    @android.annotation.SuppressLint("UnspecifiedRegisterReceiverFlag")
     DisposableEffect(Unit) {
+        val filter = IntentFilter(ACTION_STEPS_UPDATED)
         val receiver = object : BroadcastReceiver() {
-            override fun onReceive(c: Context?, i: Intent?) {
-                stepsToday = prefs.getLong(K_STEPS_TODAY, 0L)
+            override fun onReceive(context: Context?, intent: Intent?) {
+                stepsToday = prefs.getLong("steps_today", 0L)
             }
         }
 
-        // Регистрация
-        LocalBroadcastManager.getInstance(context).registerReceiver(receiver, IntentFilter(ACTION_STEPS_UPDATED))
+        if (Build.VERSION.SDK_INT >= 33) {
+            context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            context.registerReceiver(receiver, filter)
+        }
 
-        // Инициализация значения
-        stepsToday = prefs.getLong(K_STEPS_TODAY, 0L)
+        stepsToday = prefs.getLong("steps_today", 0L)
 
-        // Планирование сброса в полночь
-        MidnightResetReceiver.scheduleNext(context)
-
-        // Отмена при выходе из composable
         onDispose {
-            LocalBroadcastManager.getInstance(context).unregisterReceiver(receiver)
+            context.unregisterReceiver(receiver)
         }
     }
+
 
     /* ---------- Weather with cache ---------- */
     var weather by remember { mutableStateOf("Загрузка...") }
@@ -610,7 +631,9 @@ fun AnalyticsScreen(
                 showStepEditor = false
 
                 sendGoalNotificationIfNeeded(context, prefs, manualSteps)
-                LocalBroadcastManager.getInstance(context).sendBroadcast(Intent(ACTION_STEPS_UPDATED))
+                val intent = Intent(ACTION_STEPS_UPDATED).setPackage(context.packageName)
+                context.sendBroadcast(intent)
+
 
                 scope.launch { showSnack("Значение шагов обновлено") }
             },
@@ -651,13 +674,8 @@ class StepCounterService : Service() {
 
         // Start foreground with notification
         ensureServiceChannel()
-        val notification = NotificationCompat.Builder(this, NOTIF_CHANNEL_ID_SERVICE)
-            .setSmallIcon(R.drawable.ic_notification_logo)
-            .setContentTitle("Шагомер")
-            .setContentText("Отслеживание шагов в фоне")
-            .setPriority(NotificationCompat.PRIORITY_MIN)
-            .setOngoing(true)
-            .build()
+        val initialSteps = prefs.getLong("steps_today", 0L)
+        val notification = buildForegroundNotification(initialSteps)
         startForeground(NOTIF_ID_SERVICE, notification)
 
         // Schedule midnight reset
@@ -723,10 +741,18 @@ class StepCounterService : Service() {
                 .apply()
 
             // Broadcast update to UI
-            LocalBroadcastManager.getInstance(this@StepCounterService).sendBroadcast(Intent(ACTION_STEPS_UPDATED))
+            val intent = Intent(ACTION_STEPS_UPDATED).setPackage(packageName)
+            sendBroadcast(intent)
+            Log.d("Steps", "raw=$raw lastRaw=$lastRaw delta=$delta todaySteps=$todaySteps date=$storedDate->${today}")
+
 
             // Check and send goal notification
             sendGoalNotificationIfNeeded(this@StepCounterService, prefs, todaySteps)
+
+            // Обновляем уведомление сервиса с новыми шагами
+            val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+            nm.notify(NOTIF_ID_SERVICE, buildForegroundNotification(todaySteps))
+
         }
 
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
@@ -756,7 +782,10 @@ class StepCounterService : Service() {
                 .putLong("steps_last_ts", now)
                 .apply()
 
-            LocalBroadcastManager.getInstance(this@StepCounterService).sendBroadcast(Intent(ACTION_STEPS_UPDATED))
+            val intent = Intent(ACTION_STEPS_UPDATED).setPackage(this@StepCounterService.packageName)
+            this@StepCounterService.sendBroadcast(intent)
+
+
             sendGoalNotificationIfNeeded(this@StepCounterService, prefs, todaySteps)
         }
 
@@ -788,19 +817,64 @@ class StepCounterService : Service() {
             nm.createNotificationChannel(channel)
         }
     }
+    private fun buildForegroundNotification(stepsToday: Long): Notification {
+        val goal = prefs.getInt("step_goal", 8000)
+        val safeGoal = goal.coerceAtLeast(1)
+        val progressValue = ((stepsToday.toFloat() / safeGoal) * 100)
+            .toInt()
+            .coerceIn(0, 100)
+
+        val motivation = when {
+            progressValue >= 100 -> "Цель выполнена! 🔥"
+            progressValue >= 75  -> "Почти у цели 💪"
+            progressValue >= 50  -> "Уже половина пути 👍"
+            progressValue >= 25  -> "Хорошее начало 🙂"
+            else                 -> "Вперёд к цели! 🚀"
+        }
+
+        val intent = Intent(this, MainActivity::class.java)
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        else
+            PendingIntent.FLAG_UPDATE_CURRENT
+
+        val pendingIntent = PendingIntent.getActivity(this, 0, intent, flags)
+
+        val views = RemoteViews(packageName, R.layout.notification_steps)
+        views.setTextViewText(R.id.tvTitle, "🚶 Шаги сегодня")
+        views.setTextViewText(R.id.tvSteps, "$stepsToday из $goal шагов")
+        views.setTextViewText(R.id.tvMotivation, motivation)
+        views.setProgressBar(R.id.progressSteps, 100, progressValue, false)
+
+        return NotificationCompat.Builder(this, NOTIF_CHANNEL_ID_SERVICE)
+            .setSmallIcon(R.drawable.ic_notification_logo)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
+            .setContentIntent(pendingIntent)
+            .setStyle(NotificationCompat.DecoratedCustomViewStyle())
+            .setCustomContentView(views)
+            .setCustomBigContentView(views)
+            .build()
+    }
+
+
+
 }
 
 /* ===================== Midnight Reset Receiver ===================== */
 class MidnightResetReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         val prefs = userAnalyticsPrefs(context)
-        val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
         prefs.edit()
             .putLong("steps_today", 0L)
-            .putString("steps_today_date", today)
+            .putString("steps_today_date", todayIso())
             .apply()
 
-        // Schedule next
+        // 👉 уведомляем экран аналитики, что шаги изменились
+        context.sendBroadcast(Intent(ACTION_STEPS_UPDATED).setPackage(context.packageName))
+
+        // планируем следующий сброс
         scheduleNext(context)
     }
 
@@ -813,10 +887,17 @@ class MidnightResetReceiver : BroadcastReceiver() {
                 set(Calendar.MINUTE, 0)
                 set(Calendar.SECOND, 0)
                 set(Calendar.MILLISECOND, 0)
-                add(Calendar.DAY_OF_MONTH, 1)  // Next midnight
+                add(Calendar.DAY_OF_MONTH, 1)
             }
+
             val intent = Intent(context, MidnightResetReceiver::class.java)
-            val pi = PendingIntent.getBroadcast(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
+            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            else
+                PendingIntent.FLAG_UPDATE_CURRENT
+
+            val pi = PendingIntent.getBroadcast(context, 0, intent, flags)
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, calendar.timeInMillis, pi)
             } else {
@@ -825,6 +906,7 @@ class MidnightResetReceiver : BroadcastReceiver() {
         }
     }
 }
+
 
 /* ===================== Boot Receiver ===================== */
 class BootReceiver : BroadcastReceiver() {
@@ -1043,7 +1125,7 @@ fun StepsCardPretty(
                 modifier = Modifier
                     .combinedClickable(
                         interactionSource = interaction,
-                        indication = rememberRipple(bounded = true),
+                        //indication = rememberRipple(bounded = true),
                         onClick = {},
                         onLongClick = onLongPressEdit
                     )
