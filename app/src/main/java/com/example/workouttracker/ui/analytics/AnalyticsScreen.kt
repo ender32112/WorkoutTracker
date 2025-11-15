@@ -64,6 +64,7 @@ import com.example.workouttracker.R
 import com.example.workouttracker.ui.components.SectionHeader
 import com.example.workouttracker.ui.nutrition.NutritionEntry
 import com.example.workouttracker.ui.training.ExerciseEntry
+import com.example.workouttracker.viewmodel.AuthViewModel
 import com.example.workouttracker.viewmodel.NutritionViewModel
 import com.example.workouttracker.viewmodel.TrainingViewModel
 import kotlinx.coroutines.launch
@@ -103,6 +104,12 @@ private const val NOTIF_ID_GOAL = 1001
 private const val NOTIF_ID_SERVICE = 1002
 private const val ACTION_STEPS_UPDATED = "com.example.workouttracker.STEPS_UPDATED"
 
+private fun userAnalyticsPrefs(context: Context): SharedPreferences {
+    val authPrefs = context.getSharedPreferences(AuthViewModel.AUTH_PREFS_NAME, Context.MODE_PRIVATE)
+    val userId = authPrefs.getString(AuthViewModel.KEY_CURRENT_USER_ID, null) ?: "guest"
+    return context.getSharedPreferences("analytics_prefs_" + userId, Context.MODE_PRIVATE)
+}
+
 /* ===================== Analytics Screen ===================== */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -112,7 +119,7 @@ fun AnalyticsScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val prefs: SharedPreferences = context.getSharedPreferences("analytics_prefs", Context.MODE_PRIVATE)
+    val prefs = remember(context) { userAnalyticsPrefs(context) }
 
     // ---- Keys ----
     val K_TODAY_DATE = "steps_today_date"      // дата, для которой считаем stepsToday
@@ -528,7 +535,7 @@ class StepCounterService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        prefs = getSharedPreferences("analytics_prefs", MODE_PRIVATE)
+        prefs = userAnalyticsPrefs(this)
         sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
         stepSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
 
@@ -570,14 +577,17 @@ class StepCounterService : Service() {
             val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(now))
 
             val lastRaw = prefs.getLong("steps_last_raw", -1L)
-            val lastTs = prefs.getLong("steps_last_ts", -1L)
             val storedDate = prefs.getString("steps_today_date", today) ?: today
             var todaySteps = prefs.getLong("steps_today", 0L)
 
             // Handle first run or reboot (delta < 0)
-            var delta = if (lastRaw >= 0L) raw - lastRaw else 0L
-            if (lastRaw < 0L || lastTs < 0L || delta < 0L) {
-                delta = raw  // Add the current raw since boot/reboot
+            val hasBaseline = lastRaw >= 0L
+            var delta = if (hasBaseline) raw - lastRaw else 0L
+            when {
+                // First ever measurement after installing / clearing data – treat as baseline only
+                !hasBaseline -> delta = 0L
+                // Sensor value wrapped after reboot: raw contains steps since boot, add them once
+                delta < 0L -> delta = raw
             }
 
             // If day changed, reset todaySteps
@@ -626,7 +636,7 @@ class StepCounterService : Service() {
 /* ===================== Midnight Reset Receiver ===================== */
 class MidnightResetReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
-        val prefs = context.getSharedPreferences("analytics_prefs", Context.MODE_PRIVATE)
+        val prefs = userAnalyticsPrefs(context)
         val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
         prefs.edit()
             .putLong("steps_today", 0L)
@@ -663,7 +673,7 @@ class MidnightResetReceiver : BroadcastReceiver() {
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         if (intent?.action == Intent.ACTION_BOOT_COMPLETED) {
-            val prefs = context.getSharedPreferences("analytics_prefs", Context.MODE_PRIVATE)
+            val prefs = userAnalyticsPrefs(context)
             if (prefs.getBoolean("step_permission", false)) {
                 val serviceIntent = Intent(context, StepCounterService::class.java)
                 ContextCompat.startForegroundService(context, serviceIntent)
