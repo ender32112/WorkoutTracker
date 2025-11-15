@@ -1,7 +1,6 @@
 package com.example.workouttracker.ui.analytics
 
 import android.Manifest
-import android.annotation.SuppressLint
 import android.app.AlarmManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -18,6 +17,9 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.location.Address
+import android.location.Geocoder
+import android.location.Location
 import android.os.Build
 import android.os.IBinder
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -27,6 +29,8 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -34,6 +38,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.ripple.rememberRipple
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -68,6 +73,9 @@ import com.example.workouttracker.viewmodel.AuthViewModel
 import com.example.workouttracker.viewmodel.NutritionViewModel
 import com.example.workouttracker.viewmodel.TrainingViewModel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import retrofit2.Retrofit
@@ -80,6 +88,17 @@ import java.util.Calendar
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.ceil
+import kotlin.coroutines.resume
+
+import android.annotation.SuppressLint
+import androidx.compose.material3.AssistChip
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import com.google.android.gms.tasks.CancellationTokenSource
 
 /* ===================== Weather DTO & API ===================== */
 data class WeatherResponse(val main: Main, val weather: List<WeatherDesc>)
@@ -125,6 +144,7 @@ fun AnalyticsScreen(
     val K_TODAY_DATE = "steps_today_date"      // дата, для которой считаем stepsToday
     val K_LAST_RAW = "steps_last_raw"         // последнее "сырое" значение датчика
     val K_LAST_TS = "steps_last_ts"           // время последнего события датчика
+    val K_LAST_SENSOR_TS = "steps_last_sensor_ts" // timestamp датчика в наносекундах
     val K_STEPS_TODAY = "steps_today"         // накопленные шаги за сегодня
 
     val K_WEATHER_JSON = "weather_cache_json"
@@ -173,6 +193,60 @@ fun AnalyticsScreen(
     val notifPermLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted -> hasNotifPermission = granted }
+
+    val fusedLocationClient = remember(context) { LocationServices.getFusedLocationProviderClient(context) }
+    var detectingCity by remember { mutableStateOf(false) }
+
+    fun launchCityDetection() {
+        if (detectingCity) return
+        detectingCity = true
+        scope.launch {
+            val location = try {
+                fusedLocationClient.awaitHighAccuracyLocation()
+                    ?: fusedLocationClient.awaitLastLocationFallback()
+            } catch (_: Exception) {
+                null
+            }
+
+            val resolved = if (location != null) {
+                resolveCityName(context, location)
+            } else null
+
+            detectingCity = false
+
+            val normalized = resolved?.trim()?.takeIf { it.isNotEmpty() }
+            if (normalized != null) {
+                city = normalized
+                showSnack("Город определён: $normalized")
+            } else {
+                showSnack("Не удалось определить город")
+            }
+        }
+    }
+
+    val locationPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val granted = permissions.entries.any { it.value }
+        if (granted) {
+            launchCityDetection()
+        } else {
+            scope.launch { showSnack("Разрешение на геолокацию не предоставлено") }
+        }
+    }
+
+    fun requestCityDetection() {
+        if (context.hasLocationPermission()) {
+            launchCityDetection()
+        } else {
+            locationPermLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+        }
+    }
 
     /* ---------- Settings state ---------- */
     var stepGoal by rememberSaveable { mutableStateOf(prefs.getInt(K_STEP_GOAL, 8000)) }
@@ -394,6 +468,7 @@ fun AnalyticsScreen(
     /* ---------- Dialogs state ---------- */
     var showSettings by remember { mutableStateOf(false) }
     var showWeightEditor by remember { mutableStateOf(false) }
+    var showStepEditor by remember { mutableStateOf(false) }
 
     /* ===================== UI ===================== */
     Scaffold(
@@ -422,7 +497,8 @@ fun AnalyticsScreen(
                     steps = stepsToday,
                     goal = stepGoal,
                     hasPermission = hasStepPermission,
-                    onRequest = { stepPermLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION) }
+                    onRequest = { stepPermLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION) },
+                    onLongPressEdit = { showStepEditor = true }
                 )
             }
             item { WeatherCardPretty(city = city, weather = weather, subtitle = weatherSubtitle) }
@@ -459,6 +535,8 @@ fun AnalyticsScreen(
             currentGoal = stepGoal.toString(),
             currentNotify = notifyStepsEnabled,
             bestLimit = bestExercisesLimit,
+            detectingCity = detectingCity,
+            onDetectCity = { requestCityDetection() },
             onSave = { newCity, newGoal, notify, bestLimitNew ->
                 val c = newCity.trim().ifBlank { "Москва" }
                 val g = newGoal.toIntOrNull()?.coerceIn(1_000, 50_000) ?: 8_000
@@ -517,6 +595,29 @@ fun AnalyticsScreen(
         )
     }
 
+    if (showStepEditor) {
+        StepEditDialog(
+            currentSteps = stepsToday,
+            onApply = { manualSteps ->
+                val today = todayKeyIso()
+                prefs.edit()
+                    .putLong(K_STEPS_TODAY, manualSteps)
+                    .putString(K_TODAY_DATE, today)
+                    .putLong(K_LAST_TS, System.currentTimeMillis())
+                    .apply()
+
+                stepsToday = manualSteps
+                showStepEditor = false
+
+                sendGoalNotificationIfNeeded(context, prefs, manualSteps)
+                LocalBroadcastManager.getInstance(context).sendBroadcast(Intent(ACTION_STEPS_UPDATED))
+
+                scope.launch { showSnack("Значение шагов обновлено") }
+            },
+            onDismiss = { showStepEditor = false }
+        )
+    }
+
     LaunchedEffect(notifyStepsEnabled) {
         if (notifyStepsEnabled && Build.VERSION.SDK_INT >= 33 && !hasNotifPermission) {
             notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -529,6 +630,7 @@ class StepCounterService : Service() {
 
     private lateinit var sensorManager: SensorManager
     private var stepSensor: Sensor? = null
+    private var stepDetector: Sensor? = null
     private lateinit var prefs: SharedPreferences
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -538,10 +640,13 @@ class StepCounterService : Service() {
         prefs = userAnalyticsPrefs(this)
         sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
         stepSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
+        stepDetector = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)
 
         // Register listener if sensor available
         if (stepSensor != null) {
-            sensorManager.registerListener(stepListener, stepSensor, SensorManager.SENSOR_DELAY_NORMAL)
+            sensorManager.registerListener(stepListener, stepSensor, SensorManager.SENSOR_DELAY_FASTEST)
+        } else if (stepDetector != null) {
+            sensorManager.registerListener(stepDetectorListener, stepDetector, SensorManager.SENSOR_DELAY_NORMAL)
         }
 
         // Start foreground with notification
@@ -561,6 +666,7 @@ class StepCounterService : Service() {
 
     override fun onDestroy() {
         sensorManager.unregisterListener(stepListener)
+        sensorManager.unregisterListener(stepDetectorListener)
         super.onDestroy()
     }
 
@@ -579,6 +685,7 @@ class StepCounterService : Service() {
             val lastRaw = prefs.getLong("steps_last_raw", -1L)
             val storedDate = prefs.getString("steps_today_date", today) ?: today
             var todaySteps = prefs.getLong("steps_today", 0L)
+            val lastSensorTs = prefs.getLong("steps_last_sensor_ts", -1L)
 
             // Handle first run or reboot (delta < 0)
             val hasBaseline = lastRaw >= 0L
@@ -588,6 +695,10 @@ class StepCounterService : Service() {
                 !hasBaseline -> delta = 0L
                 // Sensor value wrapped after reboot: raw contains steps since boot, add them once
                 delta < 0L -> delta = raw
+            }
+
+            if (delta > 0) {
+                delta = limitDeltaByCadence(delta, event.timestamp, lastSensorTs)
             }
 
             // If day changed, reset todaySteps
@@ -608,6 +719,7 @@ class StepCounterService : Service() {
                 .putString("steps_today_date", effectiveDate)
                 .putLong("steps_last_raw", raw)
                 .putLong("steps_last_ts", now)
+                .putLong("steps_last_sensor_ts", event.timestamp)
                 .apply()
 
             // Broadcast update to UI
@@ -618,6 +730,51 @@ class StepCounterService : Service() {
         }
 
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+    }
+
+    private val stepDetectorListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent) {
+            if (event.sensor.type != Sensor.TYPE_STEP_DETECTOR) return
+
+            val increment = event.values.getOrNull(0)?.roundToInt()?.toLong() ?: 0L
+            if (increment <= 0L) return
+
+            val now = System.currentTimeMillis()
+            val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(now))
+            var todaySteps = prefs.getLong("steps_today", 0L)
+            val storedDate = prefs.getString("steps_today_date", today) ?: today
+
+            if (storedDate != today) {
+                todaySteps = 0L
+            }
+
+            todaySteps = (todaySteps + increment).coerceAtLeast(0L)
+
+            prefs.edit()
+                .putLong("steps_today", todaySteps)
+                .putString("steps_today_date", today)
+                .putLong("steps_last_ts", now)
+                .apply()
+
+            LocalBroadcastManager.getInstance(this@StepCounterService).sendBroadcast(Intent(ACTION_STEPS_UPDATED))
+            sendGoalNotificationIfNeeded(this@StepCounterService, prefs, todaySteps)
+        }
+
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+    }
+
+    private fun limitDeltaByCadence(delta: Long, currentSensorTs: Long, lastSensorTs: Long): Long {
+        if (delta <= 0L) return 0L
+        if (lastSensorTs <= 0L || currentSensorTs <= lastSensorTs) {
+            return delta.coerceAtMost(25L)
+        }
+        val elapsedNs = currentSensorTs - lastSensorTs
+        if (elapsedNs <= 0L) return delta.coerceAtMost(25L)
+        val elapsedSeconds = elapsedNs / 1_000_000_000.0
+        val maxStepsPerSecond = 4.5
+        val allowance = ceil(elapsedSeconds * maxStepsPerSecond + 2.0).toLong().coerceAtLeast(1L)
+        val absoluteCap = 20_000L
+        return delta.coerceAtMost(allowance.coerceAtMost(absoluteCap))
     }
 
     private fun ensureServiceChannel() {
@@ -681,6 +838,61 @@ class BootReceiver : BroadcastReceiver() {
             MidnightResetReceiver.scheduleNext(context)
         }
     }
+}
+
+@SuppressLint("MissingPermission")
+private suspend fun FusedLocationProviderClient.awaitHighAccuracyLocation(): Location? = suspendCancellableCoroutine { cont ->
+    val tokenSource = CancellationTokenSource()
+    cont.invokeOnCancellation { tokenSource.cancel() }
+    getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, tokenSource.token)
+        .addOnSuccessListener { location -> if (cont.isActive) cont.resume(location) }
+        .addOnFailureListener { if (cont.isActive) cont.resume(null) }
+}
+
+@SuppressLint("MissingPermission")
+private suspend fun FusedLocationProviderClient.awaitLastLocationFallback(): Location? = suspendCancellableCoroutine { cont ->
+    lastLocation
+        .addOnSuccessListener { location -> if (cont.isActive) cont.resume(location) }
+        .addOnFailureListener { if (cont.isActive) cont.resume(null) }
+}
+
+private suspend fun resolveCityName(context: Context, location: Location): String? = withContext(Dispatchers.IO) {
+    if (!Geocoder.isPresent()) return@withContext null
+    val geocoder = Geocoder(context, Locale.getDefault())
+    if (Build.VERSION.SDK_INT >= 33) {
+        suspendCancellableCoroutine { cont ->
+            geocoder.getFromLocation(location.latitude, location.longitude, 5, object : Geocoder.GeocodeListener {
+                override fun onGeocode(addresses: MutableList<Address>) {
+                    val name = addresses.firstOrNull()?.let { pickCityName(it) }
+                    if (cont.isActive) cont.resume(name)
+                }
+
+                override fun onError(errorMessage: String?) {
+                    if (cont.isActive) cont.resume(null)
+                }
+            })
+        }
+    } else {
+        try {
+            val result = geocoder.getFromLocation(location.latitude, location.longitude, 5)
+            result?.firstOrNull()?.let { pickCityName(it) }
+        } catch (_: Exception) {
+            null
+        }
+    }
+}
+
+private fun pickCityName(address: Address): String? {
+    return address.locality
+        ?: address.subAdminArea
+        ?: address.adminArea
+        ?: address.countryName
+}
+
+private fun Context.hasLocationPermission(): Boolean {
+    val fine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+    val coarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+    return fine || coarse
 }
 
 /* ===================== Notifications ===================== */
@@ -792,9 +1004,11 @@ fun StepsCardPretty(
     steps: Long,
     goal: Int,
     hasPermission: Boolean,
-    onRequest: () -> Unit
+    onRequest: () -> Unit,
+    onLongPressEdit: () -> Unit
 ) {
     val progress = (steps.toFloat() / goal.coerceAtLeast(1)).coerceIn(0f, 1f)
+    val interaction = remember { MutableInteractionSource() }
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.elevatedCardColors(containerColor = Color.Transparent),
@@ -823,11 +1037,81 @@ fun StepsCardPretty(
                 }
             }
             Spacer(Modifier.height(8.dp))
-            Text("$steps / $goal", style = MaterialTheme.typography.headlineSmall)
+            Text(
+                "$steps / $goal",
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier
+                    .combinedClickable(
+                        interactionSource = interaction,
+                        indication = rememberRipple(bounded = true),
+                        onClick = {},
+                        onLongClick = onLongPressEdit
+                    )
+                    .semantics { contentDescription = "steps-counter" }
+            )
             Spacer(Modifier.height(6.dp))
             FatLinearProgress(progress = progress)
         }
     }
+}
+
+@Composable
+fun StepEditDialog(
+    currentSteps: Long,
+    onApply: (Long) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var input by rememberSaveable(currentSteps) { mutableStateOf(currentSteps.toString()) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    fun validate(): Long? {
+        if (input.isBlank()) {
+            error = "Введите количество шагов"
+            return null
+        }
+        val value = input.filter { it.isDigit() }.toLongOrNull()
+        if (value == null) {
+            error = "Только целые числа"
+            return null
+        }
+        if (value < 0L || value > 200_000L) {
+            error = "Диапазон 0–200 000"
+            return null
+        }
+        error = null
+        return value
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.DirectionsWalk, contentDescription = null) },
+        title = { Text("Редактировать шаги") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Долгое нажатие по счётчику открывает меню для разработчика.")
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { newValue ->
+                        input = newValue.filter { it.isDigit() }
+                        error = null
+                    },
+                    label = { Text("Шаги за сегодня") },
+                    singleLine = true,
+                    isError = error != null,
+                    supportingText = { error?.let { Text(it, color = MaterialTheme.colorScheme.error) } }
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val value = validate()
+                if (value != null) onApply(value)
+            }) { Text("Сохранить") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        }
+    )
 }
 
 @Composable
@@ -1190,14 +1474,16 @@ fun AnalyticsSettingsDialogPretty(
     currentGoal: String,
     currentNotify: Boolean,
     bestLimit: Int,
+    detectingCity: Boolean,
+    onDetectCity: () -> Unit,
     onSave: (newCity: String, newGoal: String, notify: Boolean, bestExercisesLimit: Int) -> Unit,
     onRefreshWeather: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    var city by remember { mutableStateOf(currentCity) }
-    var goal by remember { mutableStateOf(currentGoal) }
-    var notifyEnabled by remember { mutableStateOf(currentNotify) }
-    var bestLimitState by remember { mutableStateOf(bestLimit.coerceIn(1, 10)) }
+    var city by remember(currentCity) { mutableStateOf(currentCity) }
+    var goal by remember(currentGoal) { mutableStateOf(currentGoal) }
+    var notifyEnabled by remember(currentNotify) { mutableStateOf(currentNotify) }
+    var bestLimitState by remember(bestLimit) { mutableStateOf(bestLimit.coerceIn(1, 10)) }
 
     var goalError by remember { mutableStateOf<String?>(null) }
     fun validateGoal(s: String): String? {
@@ -1254,6 +1540,21 @@ fun AnalyticsSettingsDialogPretty(
                     label = { Text("Город для погоды") },
                     leadingIcon = { Icon(Icons.Default.LocationCity, contentDescription = null) },
                     singleLine = true
+                )
+                AssistChip(
+                    onClick = onDetectCity,
+                    enabled = !detectingCity,
+                    leadingIcon = {
+                        if (detectingCity) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(Icons.Default.MyLocation, contentDescription = null)
+                        }
+                    },
+                    label = { Text(if (detectingCity) "Определяем..." else "Определить автоматически") }
                 )
 
                 // Переключатель уведомлений
