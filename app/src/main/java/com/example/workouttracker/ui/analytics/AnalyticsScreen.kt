@@ -18,6 +18,9 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.location.Address
+import android.location.Geocoder
+import android.location.Location
 import android.os.Build
 import android.os.IBinder
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -25,6 +28,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -52,6 +56,8 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.input.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -64,18 +70,30 @@ import com.example.workouttracker.R
 import com.example.workouttracker.ui.components.SectionHeader
 import com.example.workouttracker.ui.nutrition.NutritionEntry
 import com.example.workouttracker.ui.training.ExerciseEntry
+import com.example.workouttracker.viewmodel.AuthViewModel
 import com.example.workouttracker.viewmodel.NutritionViewModel
 import com.example.workouttracker.viewmodel.TrainingViewModel
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import com.google.android.gms.tasks.CancellationTokenSource
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET
 import retrofit2.http.Query
+import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.Calendar
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -103,6 +121,86 @@ private const val NOTIF_ID_GOAL = 1001
 private const val NOTIF_ID_SERVICE = 1002
 private const val ACTION_STEPS_UPDATED = "com.example.workouttracker.STEPS_UPDATED"
 
+private const val KEY_STEPS_TODAY_DATE = "steps_today_date"
+private const val KEY_STEPS_LAST_RAW = "steps_last_raw"
+private const val KEY_STEPS_LAST_TS = "steps_last_ts"
+private const val KEY_STEPS_TODAY = "steps_today"
+
+private fun userAnalyticsPrefs(context: Context): SharedPreferences {
+    val authPrefs = context.getSharedPreferences(AuthViewModel.AUTH_PREFS_NAME, Context.MODE_PRIVATE)
+    val userId = authPrefs.getString(AuthViewModel.KEY_CURRENT_USER_ID, null) ?: "guest"
+    return context.getSharedPreferences("analytics_prefs_" + userId, Context.MODE_PRIVATE)
+}
+
+private suspend fun FusedLocationProviderClient.awaitAccurateLocation(): Location? {
+    val fresh = try {
+        suspendCancellableCoroutine<Location?> { cont ->
+            val tokenSource = CancellationTokenSource()
+            try {
+                getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, tokenSource.token)
+                    .addOnSuccessListener { location -> if (cont.isActive) cont.resume(location) }
+                    .addOnFailureListener { if (cont.isActive) cont.resume(null) }
+                    .addOnCanceledListener { if (cont.isActive) cont.resume(null) }
+            } catch (e: SecurityException) {
+                if (cont.isActive) cont.resumeWithException(e)
+            }
+            cont.invokeOnCancellation { tokenSource.cancel() }
+        }
+    } catch (e: SecurityException) {
+        throw e
+    } catch (_: Exception) {
+        null
+    }
+    if (fresh != null) return fresh
+
+    return try {
+        suspendCancellableCoroutine<Location?> { cont ->
+            try {
+                lastLocation
+                    .addOnSuccessListener { if (cont.isActive) cont.resume(it) }
+                    .addOnFailureListener { if (cont.isActive) cont.resume(null) }
+                    .addOnCanceledListener { if (cont.isActive) cont.resume(null) }
+            } catch (e: SecurityException) {
+                if (cont.isActive) cont.resumeWithException(e)
+            }
+        }
+    } catch (e: SecurityException) {
+        throw e
+    } catch (_: Exception) {
+        null
+    }
+}
+
+private suspend fun Geocoder.resolveCityName(latitude: Double, longitude: Double): String? {
+    return if (Build.VERSION.SDK_INT >= 33) {
+        suspendCancellableCoroutine { cont ->
+            getFromLocation(latitude, longitude, 1, object : Geocoder.GeocodeListener {
+                override fun onGeocode(addresses: MutableList<Address>) {
+                    if (cont.isActive) cont.resume(addresses.firstOrNull()?.cityCandidate())
+                }
+
+                override fun onError(errorMessage: String?) {
+                    if (cont.isActive) cont.resume(null)
+                }
+            })
+        }
+    } else {
+        @Suppress("DEPRECATION")
+        val addresses = withContext(Dispatchers.IO) {
+            try {
+                getFromLocation(latitude, longitude, 1)
+            } catch (e: IOException) {
+                null
+            }
+        }
+        addresses?.firstOrNull()?.cityCandidate()
+    }
+}
+
+private fun Address.cityCandidate(): String? {
+    return listOfNotNull(locality, subAdminArea, adminArea, featureName).firstOrNull { it.isNotBlank() }
+}
+
 /* ===================== Analytics Screen ===================== */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -112,13 +210,7 @@ fun AnalyticsScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val prefs: SharedPreferences = context.getSharedPreferences("analytics_prefs", Context.MODE_PRIVATE)
-
-    // ---- Keys ----
-    val K_TODAY_DATE = "steps_today_date"      // дата, для которой считаем stepsToday
-    val K_LAST_RAW = "steps_last_raw"         // последнее "сырое" значение датчика
-    val K_LAST_TS = "steps_last_ts"           // время последнего события датчика
-    val K_STEPS_TODAY = "steps_today"         // накопленные шаги за сегодня
+    val prefs = remember(context) { userAnalyticsPrefs(context) }
 
     val K_WEATHER_JSON = "weather_cache_json"
     val K_WEATHER_TIME = "weather_cache_time"
@@ -136,6 +228,12 @@ fun AnalyticsScreen(
     fun timePretty(ts: Long): String = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(ts))
 
     /* ---------- Permissions ---------- */
+    fun hasLocationPermission(): Boolean {
+        val fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val coarse = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        return fine || coarse
+    }
+
     var hasStepPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(
@@ -173,20 +271,76 @@ fun AnalyticsScreen(
     var notifyStepsEnabled by rememberSaveable { mutableStateOf(prefs.getBoolean(K_NOTIFY_ENABLED, true)) }
     var bestExercisesLimit by rememberSaveable { mutableStateOf(prefs.getInt(K_BEST_EX_LIMIT, 5).coerceIn(1, 10)) }
 
+    val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
+    var isDetectingCity by remember { mutableStateOf(false) }
+    var detectedCitySuggestion by remember { mutableStateOf<String?>(null) }
+
+    suspend fun detectCityFromLocation() {
+        if (isDetectingCity) return
+        isDetectingCity = true
+        try {
+            val location = fusedLocationClient.awaitAccurateLocation() ?: run {
+                showSnack("Не удалось получить местоположение")
+                return
+            }
+            val geocoder = Geocoder(context, Locale.getDefault())
+            val cityName = geocoder.resolveCityName(location.latitude, location.longitude)
+            if (cityName != null) {
+                detectedCitySuggestion = cityName
+                showSnack("Город определён: $cityName")
+            } else {
+                showSnack("Не удалось определить город")
+            }
+        } catch (se: SecurityException) {
+            showSnack("Нет доступа к геолокации")
+        } catch (_: IOException) {
+            showSnack("Проверьте соединение для геолокации")
+        } catch (_: Exception) {
+            showSnack("Ошибка определения города")
+        } finally {
+            isDetectingCity = false
+        }
+    }
+
+    val locationPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { perms ->
+        val granted = perms.any { it.value }
+        if (granted) {
+            scope.launch { detectCityFromLocation() }
+        } else {
+            scope.launch { showSnack("Доступ к геолокации отклонён") }
+        }
+    }
+
+    fun requestCityDetection() {
+        if (isDetectingCity) return
+        if (hasLocationPermission()) {
+            scope.launch { detectCityFromLocation() }
+        } else {
+            locationPermLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+        }
+    }
+
     /* ---------- Snackbar ---------- */
     val snackbarHost = remember { SnackbarHostState() }
     suspend fun showSnack(msg: String) { snackbarHost.showSnackbar(msg) }
 
     /* ---------- Steps state ---------- */
     var stepsToday by remember {
-        mutableStateOf(prefs.getLong(K_STEPS_TODAY, 0L))
+        mutableStateOf(prefs.getLong(KEY_STEPS_TODAY, 0L))
     }
 
     /* ---------- Realtime updates via broadcast ---------- */
     DisposableEffect(Unit) {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(c: Context?, i: Intent?) {
-                stepsToday = prefs.getLong(K_STEPS_TODAY, 0L)
+                stepsToday = prefs.getLong(KEY_STEPS_TODAY, 0L)
             }
         }
 
@@ -194,7 +348,7 @@ fun AnalyticsScreen(
         LocalBroadcastManager.getInstance(context).registerReceiver(receiver, IntentFilter(ACTION_STEPS_UPDATED))
 
         // Инициализация значения
-        stepsToday = prefs.getLong(K_STEPS_TODAY, 0L)
+        stepsToday = prefs.getLong(KEY_STEPS_TODAY, 0L)
 
         // Планирование сброса в полночь
         MidnightResetReceiver.scheduleNext(context)
@@ -387,6 +541,7 @@ fun AnalyticsScreen(
     /* ---------- Dialogs state ---------- */
     var showSettings by remember { mutableStateOf(false) }
     var showWeightEditor by remember { mutableStateOf(false) }
+    var showManualStepsEditor by remember { mutableStateOf(false) }
 
     /* ===================== UI ===================== */
     Scaffold(
@@ -415,7 +570,8 @@ fun AnalyticsScreen(
                     steps = stepsToday,
                     goal = stepGoal,
                     hasPermission = hasStepPermission,
-                    onRequest = { stepPermLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION) }
+                    onRequest = { stepPermLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION) },
+                    onEditRequest = { showManualStepsEditor = true }
                 )
             }
             item { WeatherCardPretty(city = city, weather = weather, subtitle = weatherSubtitle) }
@@ -452,6 +608,10 @@ fun AnalyticsScreen(
             currentGoal = stepGoal.toString(),
             currentNotify = notifyStepsEnabled,
             bestLimit = bestExercisesLimit,
+            isDetectingCity = isDetectingCity,
+            detectedCity = detectedCitySuggestion,
+            onConsumeDetectedCity = { detectedCitySuggestion = null },
+            onDetectCity = { requestCityDetection() },
             onSave = { newCity, newGoal, notify, bestLimitNew ->
                 val c = newCity.trim().ifBlank { "Москва" }
                 val g = newGoal.toIntOrNull()?.coerceIn(1_000, 50_000) ?: 8_000
@@ -475,9 +635,13 @@ fun AnalyticsScreen(
                 scope.launch { fetchAndCacheWeather(c) }
                 showSettings = false
                 scope.launch { showSnack("Настройки сохранены") }
+                detectedCitySuggestion = null
             },
             onRefreshWeather = { scope.launch { fetchAndCacheWeather(city) } },
-            onDismiss = { showSettings = false }
+            onDismiss = {
+                detectedCitySuggestion = null
+                showSettings = false
+            }
         )
     }
 
@@ -510,6 +674,27 @@ fun AnalyticsScreen(
         )
     }
 
+    if (showManualStepsEditor) {
+        EditStepsDialog(
+            currentSteps = stepsToday,
+            onConfirm = { newSteps ->
+                val today = todayKeyIso()
+                val now = System.currentTimeMillis()
+                prefs.edit()
+                    .putLong(KEY_STEPS_TODAY, newSteps.coerceAtLeast(0L))
+                    .putString(KEY_STEPS_TODAY_DATE, today)
+                    .putLong(KEY_STEPS_LAST_TS, now)
+                    .apply()
+                stepsToday = newSteps.coerceAtLeast(0L)
+                LocalBroadcastManager.getInstance(context).sendBroadcast(Intent(ACTION_STEPS_UPDATED))
+                sendGoalNotificationIfNeeded(context, prefs, stepsToday)
+                scope.launch { showSnack("Шаги обновлены вручную") }
+                showManualStepsEditor = false
+            },
+            onDismiss = { showManualStepsEditor = false }
+        )
+    }
+
     LaunchedEffect(notifyStepsEnabled) {
         if (notifyStepsEnabled && Build.VERSION.SDK_INT >= 33 && !hasNotifPermission) {
             notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -522,19 +707,26 @@ class StepCounterService : Service() {
 
     private lateinit var sensorManager: SensorManager
     private var stepSensor: Sensor? = null
+    private var stepDetectorSensor: Sensor? = null
     private lateinit var prefs: SharedPreferences
+    private val stepAggregator = StepAggregator()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
-        prefs = getSharedPreferences("analytics_prefs", MODE_PRIVATE)
+        prefs = userAnalyticsPrefs(this)
         sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
         stepSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
+        stepDetectorSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)
+        stepAggregator.restoreFromPrefs(prefs)
 
         // Register listener if sensor available
         if (stepSensor != null) {
-            sensorManager.registerListener(stepListener, stepSensor, SensorManager.SENSOR_DELAY_NORMAL)
+            sensorManager.registerListener(stepListener, stepSensor, SensorManager.SENSOR_DELAY_GAME)
+        }
+        if (stepDetectorSensor != null) {
+            sensorManager.registerListener(stepDetectorListener, stepDetectorSensor, SensorManager.SENSOR_DELAY_FASTEST)
         }
 
         // Start foreground with notification
@@ -554,6 +746,7 @@ class StepCounterService : Service() {
 
     override fun onDestroy() {
         sensorManager.unregisterListener(stepListener)
+        sensorManager.unregisterListener(stepDetectorListener)
         super.onDestroy()
     }
 
@@ -569,45 +762,120 @@ class StepCounterService : Service() {
             val now = System.currentTimeMillis()
             val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(now))
 
-            val lastRaw = prefs.getLong("steps_last_raw", -1L)
-            val lastTs = prefs.getLong("steps_last_ts", -1L)
-            val storedDate = prefs.getString("steps_today_date", today) ?: today
-            var todaySteps = prefs.getLong("steps_today", 0L)
-
-            // Handle first run or reboot (delta < 0)
-            var delta = if (lastRaw >= 0L) raw - lastRaw else 0L
-            if (lastRaw < 0L || lastTs < 0L || delta < 0L) {
-                delta = raw  // Add the current raw since boot/reboot
-            }
-
-            // If day changed, reset todaySteps
-            val effectiveDate: String
-            if (storedDate != today) {
-                todaySteps = 0L
-                effectiveDate = today
-            } else {
-                effectiveDate = storedDate
-            }
-
-            // Add delta
-            todaySteps = (todaySteps + delta).coerceAtLeast(0L)
-
-            // Save
-            prefs.edit()
-                .putLong("steps_today", todaySteps)
-                .putString("steps_today_date", effectiveDate)
-                .putLong("steps_last_raw", raw)
-                .putLong("steps_last_ts", now)
-                .apply()
-
-            // Broadcast update to UI
-            LocalBroadcastManager.getInstance(this@StepCounterService).sendBroadcast(Intent(ACTION_STEPS_UPDATED))
-
-            // Check and send goal notification
-            sendGoalNotificationIfNeeded(this@StepCounterService, prefs, todaySteps)
+            val delta = stepAggregator.onCounterEvent(raw, now)
+            applyStepDelta(delta, raw, now)
         }
 
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+    }
+
+    private val stepDetectorListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent) {
+            if (event.sensor.type != Sensor.TYPE_STEP_DETECTOR) return
+            val now = System.currentTimeMillis()
+            val delta = stepAggregator.onDetectorEvent(now, stepSensor != null)
+            if (delta > 0L) {
+                applyStepDelta(delta, null, now)
+            }
+        }
+
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+    }
+
+    private fun applyStepDelta(delta: Long, raw: Long?, timestamp: Long) {
+        val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(timestamp))
+        var storedDate = prefs.getString(KEY_STEPS_TODAY_DATE, today) ?: today
+        var todaySteps = prefs.getLong(KEY_STEPS_TODAY, 0L)
+
+        var hasChanges = false
+        if (storedDate != today) {
+            storedDate = today
+            todaySteps = 0L
+            hasChanges = true
+        }
+        if (delta > 0L) {
+            todaySteps = (todaySteps + delta).coerceAtLeast(0L)
+            hasChanges = true
+        }
+
+        val editor = prefs.edit()
+            .putLong(KEY_STEPS_TODAY, todaySteps)
+            .putString(KEY_STEPS_TODAY_DATE, storedDate)
+            .putLong(KEY_STEPS_LAST_TS, timestamp)
+
+        val baselineRaw = raw ?: stepAggregator.currentCounterBaseline()
+        if (baselineRaw >= 0L) {
+            editor.putLong(KEY_STEPS_LAST_RAW, baselineRaw)
+        }
+
+        editor.apply()
+
+        if (hasChanges) {
+            LocalBroadcastManager.getInstance(this).sendBroadcast(Intent(ACTION_STEPS_UPDATED))
+            sendGoalNotificationIfNeeded(this, prefs, todaySteps)
+        } else if (raw != null) {
+            // baseline update only
+            LocalBroadcastManager.getInstance(this).sendBroadcast(Intent(ACTION_STEPS_UPDATED))
+        }
+    }
+
+    private class StepAggregator {
+        private var physicalCounter = -1L
+        private var virtualCounter = -1L
+        private var lastCounterTs = 0L
+        private var lastDetectorTs = 0L
+
+        fun restoreFromPrefs(prefs: SharedPreferences) {
+            physicalCounter = prefs.getLong(KEY_STEPS_LAST_RAW, -1L)
+            virtualCounter = physicalCounter
+            lastCounterTs = prefs.getLong(KEY_STEPS_LAST_TS, 0L)
+        }
+
+        fun onCounterEvent(raw: Long, timestamp: Long): Long {
+            if (physicalCounter < 0L || raw < physicalCounter) {
+                physicalCounter = raw
+                virtualCounter = raw
+                lastCounterTs = timestamp
+                return 0L
+            }
+
+            val dt = if (lastCounterTs > 0L) timestamp - lastCounterTs else Long.MAX_VALUE
+            lastCounterTs = timestamp
+
+            val baseline = if (virtualCounter >= 0L) virtualCounter else physicalCounter
+            var delta = raw - baseline
+            if (delta < 0L) {
+                physicalCounter = raw
+                virtualCounter = raw
+                return 0L
+            }
+
+            val sanitized = sanitizeDelta(delta, dt)
+            physicalCounter = raw
+            virtualCounter = baseline + sanitized
+            return sanitized
+        }
+
+        fun onDetectorEvent(timestamp: Long, counterAvailable: Boolean): Long {
+            val dt = if (lastDetectorTs > 0L) timestamp - lastDetectorTs else Long.MAX_VALUE
+            if (dt in 0..180L) return 0L
+            lastDetectorTs = timestamp
+
+            if (virtualCounter >= 0L) {
+                virtualCounter += 1L
+            }
+
+            return if (counterAvailable) 0L else 1L
+        }
+
+        fun currentCounterBaseline(): Long = physicalCounter
+
+        private fun sanitizeDelta(delta: Long, dtMillis: Long): Long {
+            if (delta <= 0L) return 0L
+            if (dtMillis == Long.MAX_VALUE) return delta
+            val maxSteps = ceil((dtMillis / 1000f) * 7f).toInt().coerceAtLeast(4)
+            return delta.coerceAtMost(maxSteps.toLong())
+        }
     }
 
     private fun ensureServiceChannel() {
@@ -626,11 +894,11 @@ class StepCounterService : Service() {
 /* ===================== Midnight Reset Receiver ===================== */
 class MidnightResetReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
-        val prefs = context.getSharedPreferences("analytics_prefs", Context.MODE_PRIVATE)
+        val prefs = userAnalyticsPrefs(context)
         val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
         prefs.edit()
-            .putLong("steps_today", 0L)
-            .putString("steps_today_date", today)
+            .putLong(KEY_STEPS_TODAY, 0L)
+            .putString(KEY_STEPS_TODAY_DATE, today)
             .apply()
 
         // Schedule next
@@ -663,7 +931,7 @@ class MidnightResetReceiver : BroadcastReceiver() {
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         if (intent?.action == Intent.ACTION_BOOT_COMPLETED) {
-            val prefs = context.getSharedPreferences("analytics_prefs", Context.MODE_PRIVATE)
+            val prefs = userAnalyticsPrefs(context)
             if (prefs.getBoolean("step_permission", false)) {
                 val serviceIntent = Intent(context, StepCounterService::class.java)
                 ContextCompat.startForegroundService(context, serviceIntent)
@@ -782,7 +1050,8 @@ fun StepsCardPretty(
     steps: Long,
     goal: Int,
     hasPermission: Boolean,
-    onRequest: () -> Unit
+    onRequest: () -> Unit,
+    onEditRequest: () -> Unit
 ) {
     val progress = (steps.toFloat() / goal.coerceAtLeast(1)).coerceIn(0f, 1f)
     ElevatedCard(
@@ -813,11 +1082,80 @@ fun StepsCardPretty(
                 }
             }
             Spacer(Modifier.height(8.dp))
-            Text("$steps / $goal", style = MaterialTheme.typography.headlineSmall)
+            Text(
+                "$steps / $goal",
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.combinedClickable(
+                    onClick = {},
+                    onLongClick = onEditRequest,
+                    onLongClickLabel = "Изменить шаги"
+                )
+            )
             Spacer(Modifier.height(6.dp))
             FatLinearProgress(progress = progress)
         }
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EditStepsDialog(
+    currentSteps: Long,
+    onConfirm: (Long) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var text by remember { mutableStateOf(currentSteps.coerceAtLeast(0L).toString()) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(currentSteps) {
+        text = currentSteps.coerceAtLeast(0L).toString()
+        error = null
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.Build, contentDescription = null) },
+        title = { Text("Ручное изменение шагов") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Функция для отладки: задайте число шагов за сегодня вручную.")
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = {
+                        text = it.filter { ch -> ch.isDigit() }
+                        error = null
+                    },
+                    label = { Text("Шаги") },
+                    leadingIcon = { Icon(Icons.Default.DirectionsWalk, contentDescription = null) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    isError = error != null,
+                    supportingText = {
+                        if (error != null) Text(error!!, color = MaterialTheme.colorScheme.error)
+                    }
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val digits = text.filter { it.isDigit() }
+                if (digits.isBlank()) {
+                    error = "Введите число"
+                    return@TextButton
+                }
+                val parsed = digits.toLongOrNull()
+                if (parsed == null) {
+                    error = "Слишком большое значение"
+                } else {
+                    onConfirm(parsed)
+                }
+            }) {
+                Text("Сохранить")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        }
+    )
 }
 
 @Composable
@@ -1180,6 +1518,10 @@ fun AnalyticsSettingsDialogPretty(
     currentGoal: String,
     currentNotify: Boolean,
     bestLimit: Int,
+    isDetectingCity: Boolean,
+    detectedCity: String?,
+    onConsumeDetectedCity: () -> Unit,
+    onDetectCity: () -> Unit,
     onSave: (newCity: String, newGoal: String, notify: Boolean, bestExercisesLimit: Int) -> Unit,
     onRefreshWeather: () -> Unit,
     onDismiss: () -> Unit
@@ -1195,6 +1537,18 @@ fun AnalyticsSettingsDialogPretty(
         val v = s.toIntOrNull() ?: return "Только целое число"
         if (v !in 1000..50000) return "Диапазон 1 000–50 000"
         return null
+    }
+
+    LaunchedEffect(currentCity) { city = currentCity }
+    LaunchedEffect(currentGoal) { goal = currentGoal }
+    LaunchedEffect(currentNotify) { notifyEnabled = currentNotify }
+    LaunchedEffect(bestLimit) { bestLimitState = bestLimit.coerceIn(1, 10) }
+    LaunchedEffect(detectedCity) {
+        val suggestion = detectedCity
+        if (suggestion != null) {
+            city = suggestion
+            onConsumeDetectedCity()
+        }
     }
 
     AlertDialog(
@@ -1244,6 +1598,24 @@ fun AnalyticsSettingsDialogPretty(
                     label = { Text("Город для погоды") },
                     leadingIcon = { Icon(Icons.Default.LocationCity, contentDescription = null) },
                     singleLine = true
+                )
+
+                AssistChip(
+                    onClick = onDetectCity,
+                    enabled = !isDetectingCity,
+                    label = {
+                        Text(if (isDetectingCity) "Определяем..." else "Определить по местоположению")
+                    },
+                    leadingIcon = {
+                        if (isDetectingCity) {
+                            CircularProgressIndicator(
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        } else {
+                            Icon(Icons.Default.MyLocation, contentDescription = null)
+                        }
+                    }
                 )
 
                 // Переключатель уведомлений
