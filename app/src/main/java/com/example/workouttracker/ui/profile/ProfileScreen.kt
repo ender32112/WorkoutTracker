@@ -51,6 +51,7 @@ fun ProfileScreen(
 ) {
     val context = LocalContext.current
     val user by authViewModel.userState.collectAsState()
+    val authError by authViewModel.authError.collectAsState()
     var editableUser by remember(user) { mutableStateOf(user) }
 
     // Диалог редактирования конкретного поля
@@ -62,6 +63,14 @@ fun ProfileScreen(
     var showDatePickerFor by remember { mutableStateOf<String?>(null) }
 
     val scroll = rememberScrollState()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(authError) {
+        authError?.let {
+            snackbarHostState.showSnackbar(it)
+            authViewModel.clearAuthError()
+        }
+    }
 
     /* ---------- Аватар: копирование в internal storage ---------- */
     fun saveAvatarToInternalStorage(uri: Uri): String? =
@@ -89,6 +98,7 @@ fun ProfileScreen(
 
     /* ---------- UI ---------- */
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             SectionHeader(
                 title = "Профиль",

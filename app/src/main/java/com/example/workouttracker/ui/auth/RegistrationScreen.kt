@@ -30,10 +30,12 @@ fun RegistrationScreen(
     var weight by remember { mutableStateOf("") }
 
     val registrationState by authViewModel.registrationState.collectAsState()
+    val authError by authViewModel.authError.collectAsState()
 
     LaunchedEffect(registrationState) {
         if (registrationState) {
             onRegisterSuccess()
+            authViewModel.clearRegistrationState()
         }
     }
 
@@ -150,6 +152,16 @@ fun RegistrationScreen(
             enabled = email.isNotBlank() && password.isNotBlank()
         ) {
             Text("Зарегистрироваться")
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        authError?.let { errorMessage ->
+            Text(
+                text = errorMessage,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodyMedium
+            )
         }
 
         TextButton(
