@@ -71,6 +71,9 @@ dependencies {
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
 
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
+
 
     // Compose BOM
     implementation(platform("androidx.compose:compose-bom:2025.05.01"))
@@ -115,6 +118,8 @@ dependencies {
 
     implementation("androidx.localbroadcastmanager:localbroadcastmanager:1.1.0")
     implementation("androidx.health.connect:connect-client:1.2.0-alpha02")
+
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.0")
 
 
 
