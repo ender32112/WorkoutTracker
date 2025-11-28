@@ -143,7 +143,7 @@ private enum class StepsHistoryRange(val days: Long, val label: String) {
     MONTH(30, "Месяц")
 }
 
-private data class StepHistoryEntry(
+data class StepHistoryEntry(
     val isoDate: String,
     val prettyDate: String,
     val steps: Long
@@ -527,6 +527,14 @@ fun AnalyticsScreen(
         return null
     }
 
+    fun validateIsoDate(text: String): String? {
+        val re = Regex("""^\d{4}-\d{2}-\d{2}$""")
+        if (!re.matches(text)) return "Формат ГГГГ-ММ-ДД"
+        val parsed = runCatching { LocalDate.parse(text) }.getOrElse { return "Некорректная дата" }
+        if (parsed.isAfter(LocalDate.now())) return "Дата не должна быть в будущем"
+        return null
+    }
+
     val onSaveWeight: () -> Unit = {
         val err = validateWeight(weightInput)
         weightError = err
@@ -735,6 +743,11 @@ fun AnalyticsScreen(
             history = stepsHistory,
             todaySteps = stepsToday,
             goal = stepGoal,
+            onAddEntry = { dateIso, steps ->
+                appendStepsHistory(prefs, dateIso, steps)
+                stepsHistory = loadStepsHistory()
+                scope.launch { showSnack("Запись за $dateIso сохранена") }
+            },
             onDismiss = { showStepsHistory = false }
         )
     }
@@ -1311,10 +1324,83 @@ fun StepEditDialog(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+fun StepHistoryAddDialog(
+    onAdd: (String, Long) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var dateInput by rememberSaveable { mutableStateOf(todayIso()) }
+    var stepsInput by rememberSaveable { mutableStateOf("") }
+    var dateError by remember { mutableStateOf<String?>(null) }
+    var stepsError by remember { mutableStateOf<String?>(null) }
+
+    fun validateAndSubmit() {
+        val normalizedDate = dateInput.trim()
+        val dateErr = validateIsoDate(normalizedDate)
+        val sanitizedSteps = stepsInput.filter { it.isDigit() }
+        val stepsValue = sanitizedSteps.toLongOrNull()
+        val stepsErr = when {
+            stepsInput.isBlank() -> "Введите шаги"
+            stepsValue == null -> "Только числа"
+            stepsValue < 0 -> "Шаги не могут быть отрицательными"
+            else -> null
+        }
+
+        dateError = dateErr
+        stepsError = stepsErr
+
+        if (dateErr == null && stepsErr == null && stepsValue != null) {
+            onAdd(normalizedDate, stepsValue)
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Добавить запись") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Скрытая запись шагов по дате", style = MaterialTheme.typography.bodyMedium)
+
+                OutlinedTextField(
+                    value = dateInput,
+                    onValueChange = {
+                        dateInput = it
+                        dateError = null
+                    },
+                    label = { Text("Дата (ГГГГ-ММ-ДД)") },
+                    isError = dateError != null,
+                    singleLine = true,
+                    supportingText = { dateError?.let { err -> Text(err, color = MaterialTheme.colorScheme.error) } }
+                )
+
+                OutlinedTextField(
+                    value = stepsInput,
+                    onValueChange = {
+                        stepsInput = it
+                        stepsError = null
+                    },
+                    label = { Text("Шаги") },
+                    singleLine = true,
+                    isError = stepsError != null,
+                    supportingText = { stepsError?.let { err -> Text(err, color = MaterialTheme.colorScheme.error) } }
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { validateAndSubmit() }) { Text("Сохранить") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
 fun StepsHistoryBottomSheet(
     history: List<StepHistoryEntry>,
     todaySteps: Long,
     goal: Int,
+    onAddEntry: (String, Long) -> Unit,
     onDismiss: () -> Unit
 ) {
     val combinedHistory = remember(history, todaySteps) {
@@ -1324,9 +1410,25 @@ fun StepsHistoryBottomSheet(
         map.values.sortedBy { it.isoDate }
     }
 
-    var range by rememberSaveable { mutableStateOf(StepsHistoryRange.WEEK) }
-    val filteredHistory = remember(combinedHistory, range) {
-        filterHistoryByRange(combinedHistory, range.days)
+    var selectedRangeName by rememberSaveable { mutableStateOf(StepsHistoryRange.MONTH.name) }
+    var showAddDialog by remember { mutableStateOf(false) }
+
+    val selectedRange = remember(selectedRangeName) {
+        runCatching { StepsHistoryRange.valueOf(selectedRangeName) }.getOrDefault(StepsHistoryRange.MONTH)
+    }
+
+    val filteredHistory = remember(combinedHistory, selectedRange) {
+        filterHistoryByRange(combinedHistory, selectedRange.days)
+    }
+
+    if (showAddDialog) {
+        StepHistoryAddDialog(
+            onAdd = { dateIso, steps ->
+                onAddEntry(dateIso, steps)
+                showAddDialog = false
+            },
+            onDismiss = { showAddDialog = false }
+        )
     }
 
     ModalBottomSheet(
@@ -1339,7 +1441,14 @@ fun StepsHistoryBottomSheet(
                 .padding(horizontal = 20.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text("История шагов", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "История шагов",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.combinedClickable(
+                    onClick = {},
+                    onLongClick = { showAddDialog = true }
+                )
+            )
             Text(
                 "Сравните ежедневные шаги и линию цели.",
                 style = MaterialTheme.typography.bodyMedium,
@@ -1347,11 +1456,11 @@ fun StepsHistoryBottomSheet(
             )
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StepsHistoryRange.values().forEach { option ->
+                StepsHistoryRange.values().forEach { range ->
                     FilterChip(
-                        selected = option == range,
-                        onClick = { range = option },
-                        label = { Text(option.label) }
+                        selected = selectedRange == range,
+                        onClick = { selectedRangeName = range.name },
+                        label = { Text(range.label) }
                     )
                 }
             }
@@ -1361,7 +1470,13 @@ fun StepsHistoryBottomSheet(
             } else {
                 StepsHistoryChart(history = filteredHistory, goal = goal)
 
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                // Получаем цвет цели в composable-контексте
+                val goalLineColor = MaterialTheme.colorScheme.tertiary
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier
@@ -1370,22 +1485,17 @@ fun StepsHistoryBottomSheet(
                                 .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp))
                         )
                         Spacer(Modifier.width(8.dp))
-                        Text("Шаги ниже цели", style = MaterialTheme.typography.labelMedium)
+                        Text("Шаги", style = MaterialTheme.typography.labelMedium)
                     }
+
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
+                        Canvas(
                             modifier = Modifier
                                 .width(24.dp)
                                 .height(4.dp)
-                                .background(MaterialTheme.colorScheme.secondary, RoundedCornerShape(2.dp))
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text("Цель достигнута", style = MaterialTheme.typography.labelMedium)
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Canvas(modifier = Modifier.width(24.dp).height(4.dp)) {
+                        ) {
                             drawLine(
-                                color = MaterialTheme.colorScheme.tertiary,
+                                color = goalLineColor,
                                 start = Offset.Zero,
                                 end = Offset(size.width, 0f),
                                 strokeWidth = size.height,
@@ -1398,6 +1508,7 @@ fun StepsHistoryBottomSheet(
                 }
 
                 Divider()
+
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     filteredHistory
                         .sortedByDescending { it.isoDate }
@@ -1427,6 +1538,7 @@ fun StepsHistoryBottomSheet(
     }
 }
 
+
 @Composable
 fun StepsHistoryChart(
     history: List<StepHistoryEntry>,
@@ -1434,7 +1546,6 @@ fun StepsHistoryChart(
     modifier: Modifier = Modifier
 ) {
     val primaryColor = MaterialTheme.colorScheme.primary
-    val successColor = MaterialTheme.colorScheme.secondary
     val goalColor = MaterialTheme.colorScheme.tertiary
     val axisColor = MaterialTheme.colorScheme.outline
     val gridColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
@@ -1468,6 +1579,16 @@ fun StepsHistoryChart(
         else -> (0 until labelCount)
             .map { idx -> ((history.size - 1).toFloat() * idx / (labelCount - 1)).roundToInt().coerceIn(0, history.lastIndex) }
             .distinct()
+    }
+
+    val goalLabelPaint = remember {
+        android.graphics.Paint().apply {
+            isAntiAlias = true
+            color = android.graphics.Color.GRAY
+            textAlign = android.graphics.Paint.Align.LEFT
+        }
+    }.also {
+        it.textSize = with(density) { 10.sp.toPx() }
     }
 
     Column(
@@ -1518,6 +1639,13 @@ fun StepsHistoryChart(
                     pathEffect = PathEffect.dashPathEffect(floatArrayOf(16f, 10f))
                 )
 
+                drawContext.canvas.nativeCanvas.drawText(
+                    "Цель",
+                    width - paddingRight + 6.dp.toPx(),
+                    goalY + goalLabelPaint.textSize / 2f - 2.dp.toPx(),
+                    goalLabelPaint
+                )
+
                 // Столбчатая диаграмма
                 if (history.isNotEmpty()) {
                     val stepX = graphWidth / history.size
@@ -1528,10 +1656,8 @@ fun StepsHistoryChart(
                         val centerX = paddingLeft + index * stepX + stepX / 2f
                         val barHeight = graphHeight * (entry.steps.toFloat() / displayMax)
                         val top = paddingTop + graphHeight - barHeight
-                        val color = if (entry.steps >= goal) successColor else primaryColor
-
                         drawRoundRect(
-                            color = color,
+                            color = primaryColor,
                             topLeft = Offset(centerX - barWidth / 2f, top),
                             size = Size(barWidth, barHeight),
                             cornerRadius = corner
