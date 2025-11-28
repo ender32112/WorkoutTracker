@@ -84,6 +84,7 @@ import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET
 import retrofit2.http.Query
 import java.text.SimpleDateFormat
+import java.time.LocalDate
 import java.util.*
 import java.util.Calendar
 import kotlin.math.max
@@ -137,7 +138,12 @@ private fun userAnalyticsPrefs(context: Context): SharedPreferences {
 private fun todayIso(): String =
     SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
 
-data class StepHistoryEntry(
+private enum class StepsHistoryRange(val days: Long, val label: String) {
+    WEEK(7, "Неделя"),
+    MONTH(30, "Месяц")
+}
+
+private data class StepHistoryEntry(
     val isoDate: String,
     val prettyDate: String,
     val steps: Long
@@ -1318,6 +1324,11 @@ fun StepsHistoryBottomSheet(
         map.values.sortedBy { it.isoDate }
     }
 
+    var range by rememberSaveable { mutableStateOf(StepsHistoryRange.WEEK) }
+    val filteredHistory = remember(combinedHistory, range) {
+        filterHistoryByRange(combinedHistory, range.days)
+    }
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
@@ -1335,18 +1346,22 @@ fun StepsHistoryBottomSheet(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            if (combinedHistory.isEmpty()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                StepsHistoryRange.values().forEach { option ->
+                    FilterChip(
+                        selected = option == range,
+                        onClick = { range = option },
+                        label = { Text(option.label) }
+                    )
+                }
+            }
+
+            if (filteredHistory.isEmpty()) {
                 Text("Пока нет данных о шагах.")
             } else {
-                StepsHistoryChart(history = combinedHistory, goal = goal)
+                StepsHistoryChart(history = filteredHistory, goal = goal)
 
-                // Получаем цвет цели в composable-контексте
-                val goalLineColor = MaterialTheme.colorScheme.tertiary
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier
@@ -1355,17 +1370,22 @@ fun StepsHistoryBottomSheet(
                                 .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp))
                         )
                         Spacer(Modifier.width(8.dp))
-                        Text("Шаги", style = MaterialTheme.typography.labelMedium)
+                        Text("Шаги ниже цели", style = MaterialTheme.typography.labelMedium)
                     }
-
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Canvas(
+                        Box(
                             modifier = Modifier
                                 .width(24.dp)
                                 .height(4.dp)
-                        ) {
+                                .background(MaterialTheme.colorScheme.secondary, RoundedCornerShape(2.dp))
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("Цель достигнута", style = MaterialTheme.typography.labelMedium)
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Canvas(modifier = Modifier.width(24.dp).height(4.dp)) {
                             drawLine(
-                                color = goalLineColor,
+                                color = MaterialTheme.colorScheme.tertiary,
                                 start = Offset.Zero,
                                 end = Offset(size.width, 0f),
                                 strokeWidth = size.height,
@@ -1378,9 +1398,8 @@ fun StepsHistoryBottomSheet(
                 }
 
                 Divider()
-
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    combinedHistory
+                    filteredHistory
                         .sortedByDescending { it.isoDate }
                         .forEach { entry ->
                             val reached = entry.steps >= goal
@@ -1398,7 +1417,12 @@ fun StepsHistoryBottomSheet(
                                             contentDescription = null
                                         )
                                     },
-                                    label = { Text(if (reached) "Цель достигнута" else "Цель не достигнута") }
+                                    label = { Text(if (reached) "Цель достигнута" else "Цель не достигнута") },
+                                    colors = AssistChipDefaults.assistChipColors(
+                                        containerColor = if (reached) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                        labelColor = if (reached) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        leadingIconContentColor = if (reached) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 )
                             }
                         }
@@ -1408,7 +1432,6 @@ fun StepsHistoryBottomSheet(
     }
 }
 
-
 @Composable
 fun StepsHistoryChart(
     history: List<StepHistoryEntry>,
@@ -1416,6 +1439,7 @@ fun StepsHistoryChart(
     modifier: Modifier = Modifier
 ) {
     val primaryColor = MaterialTheme.colorScheme.primary
+    val successColor = MaterialTheme.colorScheme.secondary
     val goalColor = MaterialTheme.colorScheme.tertiary
     val axisColor = MaterialTheme.colorScheme.outline
     val gridColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
@@ -1449,6 +1473,16 @@ fun StepsHistoryChart(
         else -> (0 until labelCount)
             .map { idx -> ((history.size - 1).toFloat() * idx / (labelCount - 1)).roundToInt().coerceIn(0, history.lastIndex) }
             .distinct()
+    }
+
+    val goalLabelPaint = remember {
+        android.graphics.Paint().apply {
+            isAntiAlias = true
+            color = android.graphics.Color.GRAY
+            textAlign = android.graphics.Paint.Align.LEFT
+        }
+    }.also {
+        it.textSize = with(density) { 10.sp.toPx() }
     }
 
     Column(
@@ -1499,29 +1533,36 @@ fun StepsHistoryChart(
                     pathEffect = PathEffect.dashPathEffect(floatArrayOf(16f, 10f))
                 )
 
-                // Ступенчатый график
+                drawContext.canvas.nativeCanvas.drawText(
+                    "Цель",
+                    width - paddingRight + 6.dp.toPx(),
+                    goalY + goalLabelPaint.textSize / 2f - 2.dp.toPx(),
+                    goalLabelPaint
+                )
+
+                // Столбчатая диаграмма
                 if (history.isNotEmpty()) {
                     val stepX = graphWidth / history.size
-                    var currentX = paddingLeft
-                    var currentY = paddingTop + graphHeight * (1f - history.first().steps.toFloat() / displayMax)
-                    drawCircle(primaryColor, 5f, Offset(currentX, currentY))
+                    val barWidth = stepX * 0.6f
+                    val corner = CornerRadius(6f, 6f)
 
                     history.forEachIndexed { index, entry ->
-                        val xEnd = paddingLeft + (index + 1) * stepX
-                        drawLine(primaryColor, Offset(currentX, currentY), Offset(xEnd, currentY), 4f)
-                        drawCircle(primaryColor, 5f, Offset(xEnd, currentY))
+                        val centerX = paddingLeft + index * stepX + stepX / 2f
+                        val barHeight = graphHeight * (entry.steps.toFloat() / displayMax)
+                        val top = paddingTop + graphHeight - barHeight
+                        val color = if (entry.steps >= goal) successColor else primaryColor
 
-                        if (index < history.lastIndex) {
-                            val nextY = paddingTop + graphHeight * (1f - history[index + 1].steps.toFloat() / displayMax)
-                            drawLine(primaryColor, Offset(xEnd, currentY), Offset(xEnd, nextY), 4f)
-                            currentX = xEnd
-                            currentY = nextY
-                        }
+                        drawRoundRect(
+                            color = color,
+                            topLeft = Offset(centerX - barWidth / 2f, top),
+                            size = Size(barWidth, barHeight),
+                            cornerRadius = corner
+                        )
                     }
 
                     // Риски и подписи X
                     labelIndices.forEach { idx ->
-                        val x = paddingLeft + (idx + 1) * stepX - stepX / 2f
+                        val x = paddingLeft + idx * stepX + stepX / 2f
                         drawLine(
                             color = gridColor,
                             start = Offset(x, height - paddingBottom),
@@ -1534,6 +1575,14 @@ fun StepsHistoryChart(
                 }
             }
         }
+    }
+}
+
+private fun filterHistoryByRange(history: List<StepHistoryEntry>, days: Long): List<StepHistoryEntry> {
+    if (history.isEmpty() || days <= 0) return history
+    val cutoff = runCatching { LocalDate.now().minusDays(days - 1) }.getOrNull() ?: return history
+    return history.filter { entry ->
+        runCatching { LocalDate.parse(entry.isoDate) }.getOrNull()?.let { !it.isBefore(cutoff) } ?: true
     }
 }
 
