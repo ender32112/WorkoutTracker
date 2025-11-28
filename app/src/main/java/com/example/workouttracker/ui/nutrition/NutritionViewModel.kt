@@ -4,8 +4,12 @@ import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.workouttracker.ui.nutrition.NutritionEntry
+import com.example.workouttracker.ui.nutrition.Dish
+import com.example.workouttracker.ui.nutrition.DishIngredient
+import com.example.workouttracker.ui.nutrition.Ingredient
 import com.example.workouttracker.ui.nutrition.MealPlan
+import com.example.workouttracker.ui.nutrition.MealType
+import com.example.workouttracker.ui.nutrition.NutritionEntry
 import com.example.workouttracker.llm.NutritionAiRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -55,18 +59,12 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             val list = mutableListOf<NutritionEntry>()
             for (i in 0 until jsonArray.length()) {
                 val obj = jsonArray.getJSONObject(i)
-                list.add(
-                    NutritionEntry(
-                        id = UUID.fromString(obj.getString("id")),
-                        date = obj.getString("date"),
-                        name = obj.getString("name"),
-                        calories = obj.getInt("calories"),
-                        protein = obj.getInt("protein"),
-                        carbs = obj.getInt("carbs"),
-                        fats = obj.getInt("fats"),
-                        weight = obj.optInt("weight", 100)
-                    )
-                )
+                val entry = runCatching { parseNewEntry(obj) }
+                    .getOrElse {
+                        // Миграция старого формата (плоские поля: name, calories, protein, fats, carbs, weight, date, mealType?)
+                        migrateLegacyEntry(obj)
+                    }
+                list.add(entry)
             }
             _entries.value = list
         } catch (e: Exception) {
@@ -75,22 +73,91 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    private fun parseNewEntry(obj: JSONObject): NutritionEntry {
+        val mealType = obj.optString("mealType", MealType.OTHER.name)
+            .let { type -> MealType.values().firstOrNull { it.name == type } ?: MealType.OTHER }
+        val dish = parseDish(obj.getJSONObject("dish"))
+        return NutritionEntry(
+            id = obj.optString("id", null)?.let { UUID.fromString(it) } ?: UUID.randomUUID(),
+            date = obj.getString("date"),
+            mealType = mealType,
+            dish = dish,
+            portionWeight = obj.getInt("portionWeight")
+        )
+    }
+
+    private fun parseDish(obj: JSONObject): Dish {
+        val ingredientsArray = obj.optJSONArray("ingredients") ?: JSONArray()
+        val ingredients = buildList {
+            for (i in 0 until ingredientsArray.length()) {
+                add(parseDishIngredient(ingredientsArray.getJSONObject(i)))
+            }
+        }
+        return Dish(
+            id = obj.optString("id", null)?.let { UUID.fromString(it) } ?: UUID.randomUUID(),
+            name = obj.optString("name", ""),
+            ingredients = ingredients
+        )
+    }
+
+    private fun parseDishIngredient(obj: JSONObject): DishIngredient {
+        val ingredientObj = obj.getJSONObject("ingredient")
+        return DishIngredient(
+            id = obj.optString("id", null)?.let { UUID.fromString(it) } ?: UUID.randomUUID(),
+            ingredient = parseIngredient(ingredientObj),
+            weightInDish = obj.optInt("weightInDish", 0)
+        )
+    }
+
+    private fun parseIngredient(obj: JSONObject): Ingredient {
+        return Ingredient(
+            id = obj.optString("id", null)?.let { UUID.fromString(it) } ?: UUID.randomUUID(),
+            name = obj.optString("name", ""),
+            caloriesPer100g = obj.optInt("caloriesPer100g", 0),
+            proteinPer100g = obj.optInt("proteinPer100g", 0),
+            fatsPer100g = obj.optInt("fatsPer100g", 0),
+            carbsPer100g = obj.optInt("carbsPer100g", 0)
+        )
+    }
+
+    private fun migrateLegacyEntry(obj: JSONObject): NutritionEntry {
+        val weight = obj.optInt("weight", 0)
+        val name = obj.optString("name", "")
+        val calories = obj.optInt("calories", 0)
+        val protein = obj.optInt("protein", 0)
+        val fats = obj.optInt("fats", 0)
+        val carbs = obj.optInt("carbs", 0)
+        val ingredient = Ingredient(
+            name = name,
+            caloriesPer100g = if (weight > 0) calories * 100 / weight else 0,
+            proteinPer100g = if (weight > 0) protein * 100 / weight else 0,
+            fatsPer100g = if (weight > 0) fats * 100 / weight else 0,
+            carbsPer100g = if (weight > 0) carbs * 100 / weight else 0
+        )
+        val dishIngredient = DishIngredient(
+            ingredient = ingredient,
+            weightInDish = weight
+        )
+        val dish = Dish(
+            name = name,
+            ingredients = listOf(dishIngredient)
+        )
+        val mealType = obj.optString("mealType", MealType.OTHER.name)
+            .let { type -> MealType.values().firstOrNull { it.name == type } ?: MealType.OTHER }
+        return NutritionEntry(
+            id = obj.optString("id", null)?.let { UUID.fromString(it) } ?: UUID.randomUUID(),
+            date = obj.getString("date"),
+            mealType = mealType,
+            dish = dish,
+            portionWeight = weight.takeIf { it > 0 } ?: dish.totalWeight
+        )
+    }
+
     private fun saveEntries() {
         try {
             val jsonArray = JSONArray()
             _entries.value.forEach { entry ->
-                jsonArray.put(
-                    JSONObject().apply {
-                        put("id", entry.id.toString())
-                        put("date", entry.date)
-                        put("name", entry.name)
-                        put("calories", entry.calories)
-                        put("protein", entry.protein)
-                        put("carbs", entry.carbs)
-                        put("fats", entry.fats)
-                        put("weight", entry.weight)
-                    }
-                )
+                jsonArray.put(entry.toJson())
             }
             prefs.edit().putString("entries", jsonArray.toString()).apply()
         } catch (e: Exception) {
@@ -98,9 +165,49 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    private fun NutritionEntry.toJson(): JSONObject = JSONObject().apply {
+        put("id", id.toString())
+        put("date", date)
+        put("mealType", mealType.name)
+        put("portionWeight", portionWeight)
+        put("dish", dish.toJson())
+    }
+
+    private fun Dish.toJson(): JSONObject = JSONObject().apply {
+        put("id", id.toString())
+        put("name", name)
+        put("ingredients", JSONArray().apply { ingredients.forEach { put(it.toJson()) } })
+    }
+
+    private fun DishIngredient.toJson(): JSONObject = JSONObject().apply {
+        put("id", id.toString())
+        put("weightInDish", weightInDish)
+        put("ingredient", ingredient.toJson())
+    }
+
+    private fun Ingredient.toJson(): JSONObject = JSONObject().apply {
+        put("id", id.toString())
+        put("name", name)
+        put("caloriesPer100g", caloriesPer100g)
+        put("proteinPer100g", proteinPer100g)
+        put("fatsPer100g", fatsPer100g)
+        put("carbsPer100g", carbsPer100g)
+    }
+
     fun addEntry(entry: NutritionEntry) {
         _entries.value = _entries.value + entry
         saveEntries()
+    }
+
+    fun addEntry(date: String, mealType: MealType, dish: Dish, portionWeight: Int) {
+        addEntry(
+            NutritionEntry(
+                date = date,
+                mealType = mealType,
+                dish = dish,
+                portionWeight = portionWeight
+            )
+        )
     }
 
     fun removeEntry(id: UUID) {
