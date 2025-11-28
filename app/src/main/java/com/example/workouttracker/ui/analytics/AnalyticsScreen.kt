@@ -143,7 +143,7 @@ private enum class StepsHistoryRange(val days: Long, val label: String) {
     MONTH(30, "Месяц")
 }
 
-private data class StepHistoryEntry(
+data class StepHistoryEntry(
     val isoDate: String,
     val prettyDate: String,
     val steps: Long
@@ -1324,11 +1324,6 @@ fun StepsHistoryBottomSheet(
         map.values.sortedBy { it.isoDate }
     }
 
-    var range by rememberSaveable { mutableStateOf(StepsHistoryRange.WEEK) }
-    val filteredHistory = remember(combinedHistory, range) {
-        filterHistoryByRange(combinedHistory, range.days)
-    }
-
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
@@ -1346,22 +1341,18 @@ fun StepsHistoryBottomSheet(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StepsHistoryRange.values().forEach { option ->
-                    FilterChip(
-                        selected = option == range,
-                        onClick = { range = option },
-                        label = { Text(option.label) }
-                    )
-                }
-            }
-
-            if (filteredHistory.isEmpty()) {
+            if (combinedHistory.isEmpty()) {
                 Text("Пока нет данных о шагах.")
             } else {
-                StepsHistoryChart(history = filteredHistory, goal = goal)
+                StepsHistoryChart(history = combinedHistory, goal = goal)
 
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                // Получаем цвет цели в composable-контексте
+                val goalLineColor = MaterialTheme.colorScheme.tertiary
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier
@@ -1370,22 +1361,17 @@ fun StepsHistoryBottomSheet(
                                 .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp))
                         )
                         Spacer(Modifier.width(8.dp))
-                        Text("Шаги ниже цели", style = MaterialTheme.typography.labelMedium)
+                        Text("Шаги", style = MaterialTheme.typography.labelMedium)
                     }
+
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
+                        Canvas(
                             modifier = Modifier
                                 .width(24.dp)
                                 .height(4.dp)
-                                .background(MaterialTheme.colorScheme.secondary, RoundedCornerShape(2.dp))
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text("Цель достигнута", style = MaterialTheme.typography.labelMedium)
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Canvas(modifier = Modifier.width(24.dp).height(4.dp)) {
+                        ) {
                             drawLine(
-                                color = MaterialTheme.colorScheme.tertiary,
+                                color = goalLineColor,
                                 start = Offset.Zero,
                                 end = Offset(size.width, 0f),
                                 strokeWidth = size.height,
@@ -1398,8 +1384,9 @@ fun StepsHistoryBottomSheet(
                 }
 
                 Divider()
+
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    filteredHistory
+                    combinedHistory
                         .sortedByDescending { it.isoDate }
                         .forEach { entry ->
                             val reached = entry.steps >= goal
@@ -1417,12 +1404,7 @@ fun StepsHistoryBottomSheet(
                                             contentDescription = null
                                         )
                                     },
-                                    label = { Text(if (reached) "Цель достигнута" else "Цель не достигнута") },
-                                    colors = AssistChipDefaults.assistChipColors(
-                                        containerColor = if (reached) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                                        labelColor = if (reached) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        leadingIconContentColor = if (reached) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                    label = { Text(if (reached) "Цель достигнута" else "Цель не достигнута") }
                                 )
                             }
                         }
@@ -1431,6 +1413,7 @@ fun StepsHistoryBottomSheet(
         }
     }
 }
+
 
 @Composable
 fun StepsHistoryChart(
