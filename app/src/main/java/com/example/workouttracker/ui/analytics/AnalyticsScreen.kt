@@ -1417,7 +1417,12 @@ fun StepsHistoryBottomSheet(
                                             contentDescription = null
                                         )
                                     },
-                                    label = { Text(if (reached) "Цель достигнута" else "Цель не достигнута") }
+                                    label = { Text(if (reached) "Цель достигнута" else "Цель не достигнута") },
+                                    colors = AssistChipDefaults.assistChipColors(
+                                        containerColor = if (reached) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                        labelColor = if (reached) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        leadingIconContentColor = if (reached) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 )
                             }
                         }
@@ -1470,6 +1475,16 @@ fun StepsHistoryChart(
             .distinct()
     }
 
+    val goalLabelPaint = remember {
+        android.graphics.Paint().apply {
+            isAntiAlias = true
+            color = android.graphics.Color.GRAY
+            textAlign = android.graphics.Paint.Align.LEFT
+        }
+    }.also {
+        it.textSize = with(density) { 10.sp.toPx() }
+    }
+
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -1516,6 +1531,13 @@ fun StepsHistoryChart(
                     end = Offset(width - paddingRight, goalY),
                     strokeWidth = 3f,
                     pathEffect = PathEffect.dashPathEffect(floatArrayOf(16f, 10f))
+                )
+
+                drawContext.canvas.nativeCanvas.drawText(
+                    "Цель",
+                    width - paddingRight + 6.dp.toPx(),
+                    goalY + goalLabelPaint.textSize / 2f - 2.dp.toPx(),
+                    goalLabelPaint
                 )
 
                 // Столбчатая диаграмма
