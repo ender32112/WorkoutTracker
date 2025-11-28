@@ -52,6 +52,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
@@ -124,6 +125,8 @@ private const val NOTIF_CHANNEL_ID_SERVICE = "step_tracking_channel"
 private const val NOTIF_ID_GOAL = 1001
 private const val NOTIF_ID_SERVICE = 1002
 private const val ACTION_STEPS_UPDATED = "com.example.workouttracker.STEPS_UPDATED"
+private const val PREF_KEY_STEPS_HISTORY = "steps_history"
+private const val MAX_STEPS_HISTORY = 30
 
 private fun userAnalyticsPrefs(context: Context): SharedPreferences {
     val authPrefs = context.getSharedPreferences(AuthViewModel.AUTH_PREFS_NAME, Context.MODE_PRIVATE)
@@ -133,6 +136,75 @@ private fun userAnalyticsPrefs(context: Context): SharedPreferences {
 
 private fun todayIso(): String =
     SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+
+private data class StepHistoryEntry(
+    val isoDate: String,
+    val prettyDate: String,
+    val steps: Long
+)
+
+private fun appendStepsHistory(prefs: SharedPreferences, dateIso: String, steps: Long) {
+    if (dateIso.isBlank()) return
+    val current = prefs.getString(PREF_KEY_STEPS_HISTORY, "[]") ?: "[]"
+    val arr = try {
+        JSONArray(current)
+    } catch (_: Exception) {
+        JSONArray()
+    }
+
+    val entries = mutableListOf<JSONObject>()
+    for (i in 0 until arr.length()) {
+        val obj = arr.optJSONObject(i)
+        if (obj != null && obj.optString("date") != dateIso) entries += obj
+    }
+
+    entries += JSONObject().apply {
+        put("date", dateIso)
+        put("steps", steps)
+    }
+
+    val sorted = entries
+        .sortedBy { it.optString("date") }
+        .takeLast(MAX_STEPS_HISTORY)
+
+    val result = JSONArray()
+    sorted.forEach { result.put(it) }
+
+    prefs.edit().putString(PREF_KEY_STEPS_HISTORY, result.toString()).apply()
+}
+
+private fun loadStepsHistoryFromPrefs(prefs: SharedPreferences): List<StepHistoryEntry> {
+    val json = prefs.getString(PREF_KEY_STEPS_HISTORY, "[]") ?: "[]"
+    return try {
+        val arr = JSONArray(json)
+        val list = mutableListOf<StepHistoryEntry>()
+        for (i in 0 until arr.length()) {
+            val obj = arr.getJSONObject(i)
+            val iso = obj.optString("date")
+            val steps = obj.optLong("steps", 0L)
+            if (iso.isNotBlank()) {
+                list += StepHistoryEntry(
+                    isoDate = iso,
+                    prettyDate = isoToPrettyDate(iso),
+                    steps = steps
+                )
+            }
+        }
+        list.sortedBy { it.isoDate }
+    } catch (_: Exception) {
+        emptyList()
+    }
+}
+
+private fun isoToPrettyDate(iso: String): String {
+    return try {
+        val parser = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        val formatter = SimpleDateFormat("dd.MM", Locale.getDefault())
+        formatter.format(parser.parse(iso) ?: return iso)
+    } catch (_: Exception) {
+        iso
+    }
+}
 
 /* ===================== Analytics Screen ===================== */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -157,6 +229,7 @@ fun AnalyticsScreen(
     val K_CITY = "weather_city"
     val K_STEP_GOAL = "step_goal"
     val K_WEIGHT_JSON = "weight_history"
+    val K_STEPS_HISTORY = PREF_KEY_STEPS_HISTORY
     val K_NOTIFY_ENABLED = "notify_steps_enabled"
     val K_GOAL_SENT_FOR_DAY = "goal_sent_day"
     val K_BEST_EX_LIMIT = "best_ex_limit"
@@ -283,6 +356,10 @@ fun AnalyticsScreen(
         mutableStateOf(prefs.getLong(K_STEPS_TODAY, 0L))
     }
 
+    fun loadStepsHistory(): List<StepHistoryEntry> = loadStepsHistoryFromPrefs(prefs)
+    var stepsHistory by remember { mutableStateOf(loadStepsHistory()) }
+    var showStepsHistory by remember { mutableStateOf(false) }
+
     /* ---------- Realtime updates via broadcast ---------- */
     @android.annotation.SuppressLint("UnspecifiedRegisterReceiverFlag")
     DisposableEffect(Unit) {
@@ -290,6 +367,7 @@ fun AnalyticsScreen(
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 stepsToday = prefs.getLong("steps_today", 0L)
+                stepsHistory = loadStepsHistory()
             }
         }
 
@@ -300,6 +378,7 @@ fun AnalyticsScreen(
         }
 
         stepsToday = prefs.getLong("steps_today", 0L)
+        stepsHistory = loadStepsHistory()
 
         onDispose {
             context.unregisterReceiver(receiver)
@@ -519,7 +598,11 @@ fun AnalyticsScreen(
                     goal = stepGoal,
                     hasPermission = hasStepPermission,
                     onRequest = { stepPermLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION) },
-                    onLongPressEdit = { showStepEditor = true }
+                    onLongPressEdit = { showStepEditor = true },
+                    onHistoryClick = {
+                        stepsHistory = loadStepsHistory()
+                        showStepsHistory = true
+                    }
                 )
             }
             item { WeatherCardPretty(city = city, weather = weather, subtitle = weatherSubtitle) }
@@ -641,6 +724,15 @@ fun AnalyticsScreen(
         )
     }
 
+    if (showStepsHistory) {
+        StepsHistoryBottomSheet(
+            history = stepsHistory,
+            todaySteps = stepsToday,
+            goal = stepGoal,
+            onDismiss = { showStepsHistory = false }
+        )
+    }
+
     LaunchedEffect(notifyStepsEnabled) {
         if (notifyStepsEnabled && Build.VERSION.SDK_INT >= 33 && !hasNotifPermission) {
             notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -722,6 +814,7 @@ class StepCounterService : Service() {
             // If day changed, reset todaySteps
             val effectiveDate: String
             if (storedDate != today) {
+                appendStepsHistory(prefs, storedDate, todaySteps)
                 todaySteps = 0L
                 effectiveDate = today
             } else {
@@ -771,6 +864,7 @@ class StepCounterService : Service() {
             val storedDate = prefs.getString("steps_today_date", today) ?: today
 
             if (storedDate != today) {
+                appendStepsHistory(prefs, storedDate, todaySteps)
                 todaySteps = 0L
             }
 
@@ -866,6 +960,10 @@ class StepCounterService : Service() {
 class MidnightResetReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         val prefs = userAnalyticsPrefs(context)
+        val storedDate = prefs.getString("steps_today_date", todayIso()) ?: todayIso()
+        val previousSteps = prefs.getLong("steps_today", 0L)
+        appendStepsHistory(prefs, storedDate, previousSteps)
+
         prefs.edit()
             .putLong("steps_today", 0L)
             .putString("steps_today_date", todayIso())
@@ -1087,7 +1185,8 @@ fun StepsCardPretty(
     goal: Int,
     hasPermission: Boolean,
     onRequest: () -> Unit,
-    onLongPressEdit: () -> Unit
+    onLongPressEdit: () -> Unit,
+    onHistoryClick: () -> Unit
 ) {
     val progress = (steps.toFloat() / goal.coerceAtLeast(1)).coerceIn(0f, 1f)
     val interaction = remember { MutableInteractionSource() }
@@ -1112,6 +1211,14 @@ fun StepsCardPretty(
                 Spacer(Modifier.width(12.dp))
                 Text("Шаги сегодня", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.weight(1f))
+                TextButton(
+                    onClick = onHistoryClick,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    Icon(Icons.Default.History, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("История")
+                }
                 if (!hasPermission) {
                     FilledTonalButton(onClick = onRequest, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)) {
                         Text("Разрешить")
@@ -1194,6 +1301,227 @@ fun StepEditDialog(
             TextButton(onClick = onDismiss) { Text("Отмена") }
         }
     )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun StepsHistoryBottomSheet(
+    history: List<StepHistoryEntry>,
+    todaySteps: Long,
+    goal: Int,
+    onDismiss: () -> Unit
+) {
+    val combinedHistory = remember(history, todaySteps) {
+        val map = history.associateBy { it.isoDate }.toMutableMap()
+        val todayIso = todayIso()
+        map[todayIso] = StepHistoryEntry(todayIso, isoToPrettyDate(todayIso), todaySteps)
+        map.values.sortedBy { it.isoDate }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text("История шагов", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Сравните ежедневные шаги и линию цели.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            if (combinedHistory.isEmpty()) {
+                Text("Пока нет данных о шагах.")
+            } else {
+                StepsHistoryChart(history = combinedHistory, goal = goal)
+
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .width(24.dp)
+                                .height(4.dp)
+                                .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp))
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("Шаги", style = MaterialTheme.typography.labelMedium)
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Canvas(modifier = Modifier.width(24.dp).height(4.dp)) {
+                            drawLine(
+                                color = MaterialTheme.colorScheme.tertiary,
+                                start = Offset.Zero,
+                                end = Offset(size.width, 0f),
+                                strokeWidth = size.height,
+                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 6f))
+                            )
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Text("Цель", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+
+                Divider()
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    combinedHistory
+                        .sortedByDescending { it.isoDate }
+                        .forEach { entry ->
+                            val reached = entry.steps >= goal
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column {
+                                    Text(entry.prettyDate, style = MaterialTheme.typography.titleSmall)
+                                    Text("${entry.steps} шагов", style = MaterialTheme.typography.labelSmall)
+                                }
+                                Spacer(Modifier.weight(1f))
+                                AssistChip(
+                                    onClick = {},
+                                    leadingIcon = {
+                                        Icon(
+                                            if (reached) Icons.Default.Check else Icons.Default.Close,
+                                            contentDescription = null
+                                        )
+                                    },
+                                    label = { Text(if (reached) "Цель достигнута" else "Цель не достигнута") }
+                                )
+                            }
+                        }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun StepsHistoryChart(
+    history: List<StepHistoryEntry>,
+    goal: Int,
+    modifier: Modifier = Modifier
+) {
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val goalColor = MaterialTheme.colorScheme.tertiary
+    val axisColor = MaterialTheme.colorScheme.outline
+    val gridColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+    val paddingDp = 24.dp
+    val density = LocalDensity.current
+    val yPaint = remember {
+        android.graphics.Paint().apply {
+            isAntiAlias = true
+            textAlign = android.graphics.Paint.Align.RIGHT
+        }
+    }.also {
+        it.textSize = with(density) { 10.sp.toPx() }
+        it.color = android.graphics.Color.GRAY
+    }
+    val xPaint = remember {
+        android.graphics.Paint().apply { isAntiAlias = true }
+    }.also {
+        it.textSize = with(density) { 10.sp.toPx() }
+        it.color = android.graphics.Color.GRAY
+        it.textAlign = android.graphics.Paint.Align.CENTER
+    }
+
+    val values = history.map { it.steps.toFloat() }
+    val displayMax = max(goal.toFloat(), values.maxOrNull() ?: 0f).coerceAtLeast(1f)
+    val stepsY = 5
+
+    val labelCount = minOf(5, history.size.coerceAtLeast(1))
+    val labelIndices: List<Int> = when {
+        history.isEmpty() -> emptyList()
+        labelCount == 1 -> listOf(0)
+        else -> (0 until labelCount)
+            .map { idx -> ((history.size - 1).toFloat() * idx / (labelCount - 1)).roundToInt().coerceIn(0, history.lastIndex) }
+            .distinct()
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(240.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+        ) {
+            val paddingPx = with(density) { paddingDp.toPx() }
+            val paddingLeft = paddingPx
+            val paddingRight = paddingPx.coerceAtMost(with(density) { 20.dp.toPx() })
+            val paddingTop = paddingPx * 0.8f
+            val paddingBottom = paddingPx * 1.4f
+
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val width = size.width
+                val height = size.height
+                val graphWidth = (width - paddingLeft - paddingRight).coerceAtLeast(1f)
+                val graphHeight = (height - paddingTop - paddingBottom).coerceAtLeast(1f)
+
+                // Оси
+                drawLine(axisColor, Offset(paddingLeft, paddingTop), Offset(paddingLeft, height - paddingBottom), 2f)
+                drawLine(axisColor, Offset(paddingLeft, height - paddingBottom), Offset(width - paddingRight, height - paddingBottom), 2f)
+
+                // Горизонтальная сетка и подписи Y
+                for (i in 0..stepsY) {
+                    val fy = i / stepsY.toFloat()
+                    val y = paddingTop + graphHeight * (1f - fy)
+                    drawLine(gridColor, Offset(paddingLeft, y), Offset(width - paddingRight, y), 1f)
+
+                    val value = (displayMax * fy).roundToInt()
+                    val fm = yPaint.fontMetrics
+                    val baseline = y - (fm.ascent + fm.descent) / 2f
+                    drawContext.canvas.nativeCanvas.drawText(value.toString(), paddingLeft - 8.dp.toPx(), baseline, yPaint)
+                }
+
+                // Линия цели
+                val goalY = paddingTop + graphHeight * (1f - goal.toFloat() / displayMax)
+                drawLine(
+                    color = goalColor,
+                    start = Offset(paddingLeft, goalY),
+                    end = Offset(width - paddingRight, goalY),
+                    strokeWidth = 3f,
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(16f, 10f))
+                )
+
+                // Ступенчатый график
+                if (history.isNotEmpty()) {
+                    val stepX = graphWidth / history.size
+                    var currentX = paddingLeft
+                    var currentY = paddingTop + graphHeight * (1f - history.first().steps.toFloat() / displayMax)
+                    drawCircle(primaryColor, 5f, Offset(currentX, currentY))
+
+                    history.forEachIndexed { index, entry ->
+                        val xEnd = paddingLeft + (index + 1) * stepX
+                        drawLine(primaryColor, Offset(currentX, currentY), Offset(xEnd, currentY), 4f)
+                        drawCircle(primaryColor, 5f, Offset(xEnd, currentY))
+
+                        if (index < history.lastIndex) {
+                            val nextY = paddingTop + graphHeight * (1f - history[index + 1].steps.toFloat() / displayMax)
+                            drawLine(primaryColor, Offset(xEnd, currentY), Offset(xEnd, nextY), 4f)
+                            currentX = xEnd
+                            currentY = nextY
+                        }
+                    }
+
+                    // Риски и подписи X
+                    labelIndices.forEach { idx ->
+                        val x = paddingLeft + (idx + 1) * stepX - stepX / 2f
+                        drawLine(
+                            color = gridColor,
+                            start = Offset(x, height - paddingBottom),
+                            end = Offset(x, height - paddingBottom + 8f),
+                            strokeWidth = 1.5f
+                        )
+                        val label = history[idx].prettyDate
+                        drawContext.canvas.nativeCanvas.drawText(label, x, height - paddingBottom / 2.8f, xPaint)
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
