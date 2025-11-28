@@ -1,28 +1,59 @@
 package com.example.workouttracker.ui.nutrition
 
 import android.app.DatePickerDialog
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Locale
+import java.util.UUID
+import kotlin.math.roundToInt
+
+data class DishIngredientUi(
+    val id: UUID = UUID.randomUUID(),
+    var name: String = "",
+    var caloriesPer100g: String = "",
+    var proteinPer100g: String = "",
+    var fatsPer100g: String = "",
+    var carbsPer100g: String = "",
+    var weightInDish: String = ""
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -34,51 +65,78 @@ fun AddNutritionDialog(
     val context = LocalContext.current
 
     var date by remember(entry?.date) {
-        mutableStateOf(entry?.date ?: SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()))
+        mutableStateOf(entry?.date ?: SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(java.util.Date()))
     }
-    var name by remember(entry?.name) { mutableStateOf(entry?.name ?: "") }
+    var dishName by remember(entry?.dish?.name) { mutableStateOf(entry?.dish?.name ?: "") }
+    var mealType by remember(entry?.mealType) { mutableStateOf(entry?.mealType ?: MealType.OTHER) }
+    var portionWeightStr by remember(entry?.portionWeight) { mutableStateOf(entry?.portionWeight?.toString() ?: "") }
 
-    var weightStr by remember(entry?.weight) { mutableStateOf(entry?.weight?.toString() ?: "") }
-    var p100 by remember { mutableStateOf("") }
-    var f100 by remember { mutableStateOf("") }
-    var c100 by remember { mutableStateOf("") }
+    val ingredients = remember { mutableStateListOf<DishIngredientUi>() }
 
-    // ← при редактировании подставляем оценку per-100 из текущей записи (если поля ещё пустые)
     LaunchedEffect(entry?.id) {
-        entry?.let { e ->
-            if (weightStr.isBlank()) weightStr = e.weight.toString()
-            if (e.weight > 0) {
-                if (p100.isBlank()) p100 = ((e.protein * 100f) / e.weight).coerceIn(0f, 100f).let { String.format(Locale.US, "%.1f", it) }
-                if (f100.isBlank()) f100 = ((e.fats * 100f) / e.weight).coerceIn(0f, 100f).let { String.format(Locale.US, "%.1f", it) }
-                if (c100.isBlank()) c100 = ((e.carbs * 100f) / e.weight).coerceIn(0f, 100f).let { String.format(Locale.US, "%.1f", it) }
+        ingredients.clear()
+        if (entry != null) {
+            entry.dish.ingredients.forEach { dishIngredient ->
+                ingredients.add(
+                    DishIngredientUi(
+                        id = dishIngredient.id,
+                        name = dishIngredient.ingredient.name,
+                        caloriesPer100g = dishIngredient.ingredient.caloriesPer100g.toString(),
+                        proteinPer100g = dishIngredient.ingredient.proteinPer100g.toString(),
+                        fatsPer100g = dishIngredient.ingredient.fatsPer100g.toString(),
+                        carbsPer100g = dishIngredient.ingredient.carbsPer100g.toString(),
+                        weightInDish = dishIngredient.weightInDish.toString()
+                    )
+                )
             }
+        }
+        if (ingredients.isEmpty()) {
+            ingredients.add(DishIngredientUi())
         }
     }
 
     // Ошибки
-    var nameError by remember { mutableStateOf<String?>(null) }
-    var weightError by remember { mutableStateOf<String?>(null) }
-    var macroError by remember { mutableStateOf<String?>(null) }
+    var dishNameError by remember { mutableStateOf<String?>(null) }
+    var ingredientsError by remember { mutableStateOf<String?>(null) }
+    var portionWeightError by remember { mutableStateOf<String?>(null) }
     var hardLimitError by remember { mutableStateOf<String?>(null) }
-
-    // Парсинг
-    val weight = weightStr.toIntOrNull() ?: 0
-    val p100f = p100.replace(',', '.').toFloatOrNull() ?: 0f
-    val f100f = f100.replace(',', '.').toFloatOrNull() ?: 0f
-    val c100f = c100.replace(',', '.').toFloatOrNull() ?: 0f
-
-    // Итоги
-    val totalProtein = ((p100f * weight) / 100f).toInt()
-    val totalFats   = ((f100f * weight) / 100f).toInt()
-    val totalCarbs  = ((c100f * weight) / 100f).toInt()
-    val totalKcal   = 4 * totalProtein + 9 * totalFats + 4 * totalCarbs
 
     // Жёсткие рамки
     val WEIGHT_MIN = 1
     val WEIGHT_MAX = 2000
     val PER100_MIN = 0f
     val PER100_MAX = 100f
+    val CALORIES_PER100_MAX = 1000f
     val KCAL_MAX = 6000
+
+    val parsedPortionWeight = portionWeightStr.toIntOrNull() ?: 0
+
+    val totalWeightDish = ingredients.sumOf { it.weightInDish.toIntOrNull()?.takeIf { w -> w > 0 } ?: 0 }
+
+    fun parseMacro(value: String): Int {
+        val floatValue = value.replace(',', '.').toFloatOrNull() ?: 0f
+        return floatValue.roundToInt()
+    }
+
+    fun weightedMacro(selector: (DishIngredientUi) -> Int): Int {
+        if (totalWeightDish == 0) return 0
+        val numerator = ingredients.sumOf { ingredient ->
+            val weight = ingredient.weightInDish.toIntOrNull()?.takeIf { it > 0 } ?: 0
+            val macro = selector(ingredient)
+            macro * weight
+        }
+        return numerator / totalWeightDish
+    }
+
+    val dishCaloriesPer100g = weightedMacro { parseMacro(it.caloriesPer100g) }
+    val dishProteinPer100g = weightedMacro { parseMacro(it.proteinPer100g) }
+    val dishFatsPer100g = weightedMacro { parseMacro(it.fatsPer100g) }
+    val dishCarbsPer100g = weightedMacro { parseMacro(it.carbsPer100g) }
+
+    val portionCalories = dishCaloriesPer100g * parsedPortionWeight / 100
+    val portionProtein = dishProteinPer100g * parsedPortionWeight / 100
+    val portionFats = dishFatsPer100g * parsedPortionWeight / 100
+    val portionCarbs = dishCarbsPer100g * parsedPortionWeight / 100
 
     var showDatePicker by remember { mutableStateOf(false) }
     if (showDatePicker) {
@@ -93,6 +151,9 @@ fun AddNutritionDialog(
         ).apply { setOnDismissListener { showDatePicker = false } }.show()
     }
 
+    val canSave = dishName.isNotBlank() && ingredients.isNotEmpty() && parsedPortionWeight in WEIGHT_MIN..WEIGHT_MAX &&
+            totalWeightDish > 0 && portionCalories <= KCAL_MAX
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -102,167 +163,346 @@ fun AddNutritionDialog(
             )
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = {
-                        name = it.take(40) // ограничим длину
-                        nameError = null
-                    },
-                    label = { Text("Название блюда") },
-                    supportingText = { if (nameError != null) Text(nameError!!, color = MaterialTheme.colorScheme.error) },
-                    isError = nameError != null,
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                OutlinedTextField(
-                    value = formatDateForDisplay(date),
-                    onValueChange = {},
-                    label = { Text("Дата") },
-                    readOnly = true,
-                    trailingIcon = {
-                        IconButton(onClick = { showDatePicker = true }) {
-                            Icon(Icons.Filled.CalendarMonth, contentDescription = "Выбрать дату")
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                OutlinedTextField(
-                    value = weightStr,
-                    onValueChange = { s ->
-                        weightStr = s.filter { it.isDigit() }.take(4)
-                        weightError = null
-                        hardLimitError = null
-                    },
-                    label = { Text("Вес порции, г") },
-                    supportingText = {
-                        when {
-                            hardLimitError != null -> Text(hardLimitError!!, color = MaterialTheme.colorScheme.error)
-                            weightError != null -> Text(weightError!!, color = MaterialTheme.colorScheme.error)
-                        }
-                    },
-                    isError = weightError != null || hardLimitError != null,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                item {
                     OutlinedTextField(
-                        value = p100,
-                        onValueChange = { s ->
-                            p100 = s.filter { it.isDigit() || it == '.' || it == ',' }.take(6)
-                            macroError = null
+                        value = dishName,
+                        onValueChange = {
+                            dishName = it.take(40)
+                            dishNameError = null
                         },
-                        label = { Text("Белки / 100 г") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        label = { Text("Название блюда") },
+                        supportingText = { dishNameError?.let { msg -> Text(msg, color = MaterialTheme.colorScheme.error) } },
+                        isError = dishNameError != null,
                         singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                    OutlinedTextField(
-                        value = f100,
-                        onValueChange = { s ->
-                            f100 = s.filter { it.isDigit() || it == '.' || it == ',' }.take(6)
-                            macroError = null
-                        },
-                        label = { Text("Жиры / 100 г") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                    OutlinedTextField(
-                        value = c100,
-                        onValueChange = { s ->
-                            c100 = s.filter { it.isDigit() || it == '.' || it == ',' }.take(6)
-                            macroError = null
-                        },
-                        label = { Text("Углеводы / 100 г") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
-                if (macroError != null) {
-                    Text(macroError!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+
+                item {
+                    OutlinedTextField(
+                        value = formatDateForDisplay(date),
+                        onValueChange = {},
+                        label = { Text("Дата") },
+                        readOnly = true,
+                        trailingIcon = {
+                            IconButton(onClick = { showDatePicker = true }) {
+                                Icon(Icons.Filled.CalendarMonth, contentDescription = "Выбрать дату")
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
 
-                ElevatedCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    elevation = CardDefaults.elevatedCardElevation(defaultElevation = 4.dp)
-                ) {
-                    Column(Modifier.padding(12.dp)) {
-                        Text("Итого за порцию", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
-                        Spacer(Modifier.height(6.dp))
-                        Text("Калории: $totalKcal ккал", style = MaterialTheme.typography.bodyMedium)
-                        Text("Б: $totalProtein г   Ж: $totalFats г   У: $totalCarbs г", style = MaterialTheme.typography.bodyMedium)
+                item {
+                    Text(
+                        text = "Тип приёма пищи",
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium)
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    val mealTypeLabels = mapOf(
+                        MealType.BREAKFAST to "Завтрак",
+                        MealType.LUNCH to "Обед",
+                        MealType.DINNER to "Ужин",
+                        MealType.SNACK to "Перекус",
+                        MealType.OTHER to "Другое"
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        mealTypeLabels.forEach { (type, label) ->
+                            FilterChip(
+                                selected = mealType == type,
+                                onClick = { mealType = type },
+                                label = { Text(label) }
+                            )
+                        }
                     }
+                }
+
+                item {
+                    Text(
+                        text = "Ингредиенты блюда",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                    Spacer(Modifier.height(8.dp))
+                }
+
+                itemsIndexed(ingredients, key = { _, item -> item.id }) { index, ingredient ->
+                    Surface(
+                        tonalElevation = 2.dp,
+                        shape = MaterialTheme.shapes.medium,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.padding(12.dp)
+                        ) {
+                            Text(
+                                text = "Ингредиент ${index + 1}",
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium)
+                            )
+                            OutlinedTextField(
+                                value = ingredient.name,
+                                onValueChange = {
+                                    ingredients[index] = ingredient.copy(name = it.take(40))
+                                    ingredientsError = null
+                                },
+                                label = { Text("Название") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedTextField(
+                                    value = ingredient.caloriesPer100g,
+                                    onValueChange = { value ->
+                                        ingredients[index] = ingredient.copy(
+                                            caloriesPer100g = value.filter { it.isDigit() || it == '.' || it == ',' }.take(6)
+                                        )
+                                        ingredientsError = null
+                                    },
+                                    label = { Text("Калории /100 г") },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                OutlinedTextField(
+                                    value = ingredient.proteinPer100g,
+                                    onValueChange = { value ->
+                                        ingredients[index] = ingredient.copy(
+                                            proteinPer100g = value.filter { it.isDigit() || it == '.' || it == ',' }.take(6)
+                                        )
+                                        ingredientsError = null
+                                    },
+                                    label = { Text("Белки /100 г") },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedTextField(
+                                    value = ingredient.fatsPer100g,
+                                    onValueChange = { value ->
+                                        ingredients[index] = ingredient.copy(
+                                            fatsPer100g = value.filter { it.isDigit() || it == '.' || it == ',' }.take(6)
+                                        )
+                                        ingredientsError = null
+                                    },
+                                    label = { Text("Жиры /100 г") },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                OutlinedTextField(
+                                    value = ingredient.carbsPer100g,
+                                    onValueChange = { value ->
+                                        ingredients[index] = ingredient.copy(
+                                            carbsPer100g = value.filter { it.isDigit() || it == '.' || it == ',' }.take(6)
+                                        )
+                                        ingredientsError = null
+                                    },
+                                    label = { Text("Углеводы /100 г") },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+
+                            OutlinedTextField(
+                                value = ingredient.weightInDish,
+                                onValueChange = { value ->
+                                    ingredients[index] = ingredient.copy(
+                                        weightInDish = value.filter { it.isDigit() }.take(5)
+                                    )
+                                    ingredientsError = null
+                                },
+                                label = { Text("Вес в блюде, г") },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            Row(
+                                horizontalArrangement = Arrangement.End,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                TextButton(
+                                    onClick = { ingredients.remove(ingredient) },
+                                    enabled = ingredients.size > 1
+                                ) {
+                                    Icon(Icons.Filled.Delete, contentDescription = "Удалить")
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Удалить")
+                                }
+                            }
+                        }
+                    }
+                }
+
+                item {
+                    Spacer(Modifier.height(8.dp))
+                    Button(onClick = {
+                        ingredients.add(DishIngredientUi())
+                        ingredientsError = null
+                    }) {
+                        Text("Добавить ингредиент")
+                    }
+                    if (ingredientsError != null) {
+                        Text(
+                            text = ingredientsError!!,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(top = 6.dp)
+                        )
+                    }
+                }
+
+                item {
+                    ElevatedCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    ) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text("Блюдо (на 100 г)", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                "${dishCaloriesPer100g} ккал, ${dishProteinPer100g} г белков, ${dishFatsPer100g} г жиров, ${dishCarbsPer100g} г углеводов",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            if (totalWeightDish == 0) {
+                                Text(
+                                    "Добавьте вес ингредиентов, чтобы рассчитать блюдо",
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.padding(top = 4.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                item {
+                    OutlinedTextField(
+                        value = portionWeightStr,
+                        onValueChange = { value ->
+                            portionWeightStr = value.filter { it.isDigit() }.take(4)
+                            portionWeightError = null
+                            hardLimitError = null
+                        },
+                        label = { Text("Сколько грамм блюда вы съели?") },
+                        supportingText = {
+                            when {
+                                hardLimitError != null -> Text(hardLimitError!!, color = MaterialTheme.colorScheme.error)
+                                portionWeightError != null -> Text(portionWeightError!!, color = MaterialTheme.colorScheme.error)
+                                parsedPortionWeight > 0 -> Text(
+                                    "Порция: ${portionCalories} ккал, $portionProtein г белков, $portionFats г жиров, $portionCarbs г углеводов",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        },
+                        isError = portionWeightError != null || hardLimitError != null,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
             }
         },
         confirmButton = {
-            val canSave = name.isNotBlank() && weight in WEIGHT_MIN..WEIGHT_MAX &&
-                    // хотя бы один макро > 0
-                    (p100f > 0f || f100f > 0f || c100f > 0f) &&
-                    // все введённые макро в допустимых границах
-                    (p100f in PER100_MIN..PER100_MAX || p100.isBlank()) &&
-                    (f100f in PER100_MIN..PER100_MAX || f100.isBlank()) &&
-                    (c100f in PER100_MIN..PER100_MAX || c100.isBlank()) &&
-                    // итоговые калории не зашкаливают
-                    (totalKcal <= KCAL_MAX)
-
             TextButton(
                 onClick = {
-                    var ok = true
-                    if (name.isBlank()) { nameError = "Укажите название"; ok = false }
+                    dishNameError = null
+                    ingredientsError = null
+                    portionWeightError = null
+                    hardLimitError = null
 
-                    if (weight !in WEIGHT_MIN..WEIGHT_MAX) {
-                        weightError = "Диапазон $WEIGHT_MIN–$WEIGHT_MAX г"
-                        ok = false
+                    if (dishName.isBlank()) {
+                        dishNameError = "Укажите название блюда"
+                        return@TextButton
                     }
 
-                    fun checkMacro(v: Float, label: String): Boolean {
-                        if (v == 0f) return true // ноль допустим, если другие макросы заданы
-                        if (v !in PER100_MIN..PER100_MAX) {
-                            macroError = "$label /100 г: $PER100_MIN..$PER100_MAX"
-                            return false
+                    if (ingredients.isEmpty()) {
+                        ingredientsError = "Добавьте хотя бы один ингредиент"
+                        return@TextButton
+                    }
+
+                    ingredients.forEach { ingredient ->
+                        if (ingredient.name.isBlank()) {
+                            ingredientsError = "Укажите названия всех ингредиентов"
+                            return@TextButton
                         }
-                        return true
-                    }
-                    val mOk = checkMacro(p100f, "Белки") && checkMacro(f100f, "Жиры") && checkMacro(c100f, "Углеводы")
-                    if (!mOk) ok = false
 
-                    if (p100f <= 0f && f100f <= 0f && c100f <= 0f) {
-                        macroError = "Укажите хотя бы один макроэлемент /100 г"
-                        ok = false
+                        val weightInDish = ingredient.weightInDish.toIntOrNull()
+                        if (weightInDish == null || weightInDish <= 0) {
+                            ingredientsError = "Вес ингредиента должен быть больше 0"
+                            return@TextButton
+                        }
+
+                        fun checkRange(value: String, label: String, min: Float, max: Float): Boolean {
+                            val parsed = value.replace(',', '.').toFloatOrNull() ?: 0f
+                            if (value.isBlank()) return true
+                            if (parsed !in min..max) {
+                                ingredientsError = "$label /100 г: $min..$max"
+                                return false
+                            }
+                            return true
+                        }
+
+                        if (!checkRange(ingredient.proteinPer100g, "Белки", PER100_MIN, PER100_MAX) ||
+                            !checkRange(ingredient.fatsPer100g, "Жиры", PER100_MIN, PER100_MAX) ||
+                            !checkRange(ingredient.carbsPer100g, "Углеводы", PER100_MIN, PER100_MAX) ||
+                            !checkRange(ingredient.caloriesPer100g, "Калории", PER100_MIN, CALORIES_PER100_MAX)
+                        ) {
+                            return@TextButton
+                        }
                     }
 
-                    if (totalKcal > KCAL_MAX) {
+                    if (totalWeightDish <= 0) {
+                        ingredientsError = "Общий вес блюда должен быть больше 0"
+                        return@TextButton
+                    }
+
+                    if (parsedPortionWeight !in WEIGHT_MIN..WEIGHT_MAX) {
+                        portionWeightError = "Диапазон $WEIGHT_MIN–$WEIGHT_MAX г"
+                        return@TextButton
+                    }
+
+                    if (portionCalories > KCAL_MAX) {
                         hardLimitError = "Слишком много калорий (> $KCAL_MAX ккал)"
-                        ok = false
-                    } else {
-                        hardLimitError = null
+                        return@TextButton
                     }
 
-                    if (!ok) return@TextButton
+                    val dishIngredients = ingredients.map { ingredient ->
+                        val ingredientWeight = ingredient.weightInDish.toIntOrNull() ?: 0
+                        DishIngredient(
+                            id = ingredient.id,
+                            ingredient = Ingredient(
+                                id = ingredient.id,
+                                name = ingredient.name.trim(),
+                                caloriesPer100g = parseMacro(ingredient.caloriesPer100g),
+                                proteinPer100g = parseMacro(ingredient.proteinPer100g),
+                                fatsPer100g = parseMacro(ingredient.fatsPer100g),
+                                carbsPer100g = parseMacro(ingredient.carbsPer100g)
+                            ),
+                            weightInDish = ingredientWeight
+                        )
+                    }
 
-                    // Если редактируем существующую запись — сохраняем её id,
-                    // если создаём новую — генерируем новый id по умолчанию
-                    val id = entry?.id ?: java.util.UUID.randomUUID()
+                    val dish = Dish(
+                        id = entry?.dish?.id ?: UUID.randomUUID(),
+                        name = dishName.trim(),
+                        ingredients = dishIngredients
+                    )
 
                     val newEntry = NutritionEntry(
-                        id = id,
+                        id = entry?.id ?: UUID.randomUUID(),
                         date = date,
-                        name = name.trim(),
-                        calories = totalKcal,
-                        protein = totalProtein,
-                        carbs = totalCarbs,
-                        fats = totalFats,
-                        weight = weight
+                        mealType = mealType,
+                        dish = dish,
+                        portionWeight = parsedPortionWeight
                     )
+
                     onConfirm(newEntry)
                 },
                 enabled = canSave
@@ -271,7 +511,6 @@ fun AddNutritionDialog(
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
     )
 }
-
 
 fun formatDateForDisplay(date: String): String =
     date.replace(Regex("(\\d{4})-(\\d{2})-(\\d{2})"), "$3.$2.$1")
