@@ -249,10 +249,12 @@ fun AddNutritionDialog(
 
                     if (!ok) return@TextButton
 
-                    val base = entry ?: NutritionEntry(
-                        date = date, name = "", calories = 0, protein = 0, carbs = 0, fats = 0, weight = 0
-                    )
-                    val newEntry = base.copy(
+                    // Если редактируем существующую запись — сохраняем её id,
+                    // если создаём новую — генерируем новый id по умолчанию
+                    val id = entry?.id ?: java.util.UUID.randomUUID()
+
+                    val newEntry = NutritionEntry(
+                        id = id,
                         date = date,
                         name = name.trim(),
                         calories = totalKcal,

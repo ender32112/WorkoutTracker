@@ -53,17 +53,37 @@ fun NutritionScreen(
 
     val grouped = entries.groupBy { it.date }.toSortedMap(compareByDescending { it })
     val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-    val todayTotal = grouped[today]?.fold(
-        NutritionEntry(date = today, name = "", calories = 0, protein = 0, carbs = 0, fats = 0, weight = 0)
-    ) { acc, e ->
-        acc.copy(
-            calories = acc.calories + e.calories,
-            protein = acc.protein + e.protein,
-            carbs = acc.carbs + e.carbs,
-            fats = acc.fats + e.fats,
-            weight = acc.weight + e.weight
-        )
-    } ?: NutritionEntry(date = today, name = "", calories = 0, protein = 0, carbs = 0, fats = 0, weight = 0)
+    val todayEntries = grouped[today].orEmpty()
+
+    val totalCalories = todayEntries.sumOf { it.calories }
+    val totalProtein  = todayEntries.sumOf { it.protein }
+    val totalCarbs    = todayEntries.sumOf { it.carbs }
+    val totalFats     = todayEntries.sumOf { it.fats }
+    val totalWeight   = todayEntries.sumOf { it.weight }
+
+    val todayTotal =
+        if (todayEntries.isEmpty()) {
+            NutritionEntry(
+                date = today,
+                name = "",
+                calories = 0,
+                protein = 0,
+                carbs = 0,
+                fats = 0,
+                weight = 0
+            )
+        } else {
+            NutritionEntry(
+                date = today,
+                name = "Итого",
+                calories = totalCalories,
+                protein = totalProtein,
+                carbs = totalCarbs,
+                fats = totalFats,
+                weight = totalWeight
+            )
+        }
+
 
     Scaffold(
         topBar = {
@@ -474,6 +494,7 @@ fun MealPlanCard(
                                     MealType.LUNCH -> "Обед"
                                     MealType.DINNER -> "Ужин"
                                     MealType.SNACK -> "Перекус"
+                                    MealType.OTHER ->  "Другое"
                                 },
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
                             )
