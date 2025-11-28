@@ -137,7 +137,7 @@ private fun userAnalyticsPrefs(context: Context): SharedPreferences {
 private fun todayIso(): String =
     SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
 
-private data class StepHistoryEntry(
+data class StepHistoryEntry(
     val isoDate: String,
     val prettyDate: String,
     val steps: Long
@@ -1340,7 +1340,13 @@ fun StepsHistoryBottomSheet(
             } else {
                 StepsHistoryChart(history = combinedHistory, goal = goal)
 
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                // Получаем цвет цели в composable-контексте
+                val goalLineColor = MaterialTheme.colorScheme.tertiary
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier
@@ -1351,10 +1357,15 @@ fun StepsHistoryBottomSheet(
                         Spacer(Modifier.width(8.dp))
                         Text("Шаги", style = MaterialTheme.typography.labelMedium)
                     }
+
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Canvas(modifier = Modifier.width(24.dp).height(4.dp)) {
+                        Canvas(
+                            modifier = Modifier
+                                .width(24.dp)
+                                .height(4.dp)
+                        ) {
                             drawLine(
-                                color = MaterialTheme.colorScheme.tertiary,
+                                color = goalLineColor,
                                 start = Offset.Zero,
                                 end = Offset(size.width, 0f),
                                 strokeWidth = size.height,
@@ -1367,6 +1378,7 @@ fun StepsHistoryBottomSheet(
                 }
 
                 Divider()
+
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     combinedHistory
                         .sortedByDescending { it.isoDate }
@@ -1395,6 +1407,7 @@ fun StepsHistoryBottomSheet(
         }
     }
 }
+
 
 @Composable
 fun StepsHistoryChart(
