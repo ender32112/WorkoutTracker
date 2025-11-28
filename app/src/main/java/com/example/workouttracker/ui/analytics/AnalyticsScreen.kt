@@ -527,6 +527,14 @@ fun AnalyticsScreen(
         return null
     }
 
+    fun validateIsoDate(text: String): String? {
+        val re = Regex("""^\d{4}-\d{2}-\d{2}$""")
+        if (!re.matches(text)) return "Формат ГГГГ-ММ-ДД"
+        val parsed = runCatching { LocalDate.parse(text) }.getOrElse { return "Некорректная дата" }
+        if (parsed.isAfter(LocalDate.now())) return "Дата не должна быть в будущем"
+        return null
+    }
+
     val onSaveWeight: () -> Unit = {
         val err = validateWeight(weightInput)
         weightError = err
@@ -735,6 +743,11 @@ fun AnalyticsScreen(
             history = stepsHistory,
             todaySteps = stepsToday,
             goal = stepGoal,
+            onAddEntry = { dateIso, steps ->
+                appendStepsHistory(prefs, dateIso, steps)
+                stepsHistory = loadStepsHistory()
+                scope.launch { showSnack("Запись за $dateIso сохранена") }
+            },
             onDismiss = { showStepsHistory = false }
         )
     }
@@ -1311,10 +1324,83 @@ fun StepEditDialog(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+fun StepHistoryAddDialog(
+    onAdd: (String, Long) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var dateInput by rememberSaveable { mutableStateOf(todayIso()) }
+    var stepsInput by rememberSaveable { mutableStateOf("") }
+    var dateError by remember { mutableStateOf<String?>(null) }
+    var stepsError by remember { mutableStateOf<String?>(null) }
+
+    fun validateAndSubmit() {
+        val normalizedDate = dateInput.trim()
+        val dateErr = validateIsoDate(normalizedDate)
+        val sanitizedSteps = stepsInput.filter { it.isDigit() }
+        val stepsValue = sanitizedSteps.toLongOrNull()
+        val stepsErr = when {
+            stepsInput.isBlank() -> "Введите шаги"
+            stepsValue == null -> "Только числа"
+            stepsValue < 0 -> "Шаги не могут быть отрицательными"
+            else -> null
+        }
+
+        dateError = dateErr
+        stepsError = stepsErr
+
+        if (dateErr == null && stepsErr == null && stepsValue != null) {
+            onAdd(normalizedDate, stepsValue)
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Добавить запись") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Скрытая запись шагов по дате", style = MaterialTheme.typography.bodyMedium)
+
+                OutlinedTextField(
+                    value = dateInput,
+                    onValueChange = {
+                        dateInput = it
+                        dateError = null
+                    },
+                    label = { Text("Дата (ГГГГ-ММ-ДД)") },
+                    isError = dateError != null,
+                    singleLine = true,
+                    supportingText = { dateError?.let { err -> Text(err, color = MaterialTheme.colorScheme.error) } }
+                )
+
+                OutlinedTextField(
+                    value = stepsInput,
+                    onValueChange = {
+                        stepsInput = it
+                        stepsError = null
+                    },
+                    label = { Text("Шаги") },
+                    singleLine = true,
+                    isError = stepsError != null,
+                    supportingText = { stepsError?.let { err -> Text(err, color = MaterialTheme.colorScheme.error) } }
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { validateAndSubmit() }) { Text("Сохранить") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
 fun StepsHistoryBottomSheet(
     history: List<StepHistoryEntry>,
     todaySteps: Long,
     goal: Int,
+    onAddEntry: (String, Long) -> Unit,
     onDismiss: () -> Unit
 ) {
     val combinedHistory = remember(history, todaySteps) {
@@ -1322,6 +1408,27 @@ fun StepsHistoryBottomSheet(
         val todayIso = todayIso()
         map[todayIso] = StepHistoryEntry(todayIso, isoToPrettyDate(todayIso), todaySteps)
         map.values.sortedBy { it.isoDate }
+    }
+
+    var selectedRangeName by rememberSaveable { mutableStateOf(StepsHistoryRange.MONTH.name) }
+    var showAddDialog by remember { mutableStateOf(false) }
+
+    val selectedRange = remember(selectedRangeName) {
+        runCatching { StepsHistoryRange.valueOf(selectedRangeName) }.getOrDefault(StepsHistoryRange.MONTH)
+    }
+
+    val filteredHistory = remember(combinedHistory, selectedRange) {
+        filterHistoryByRange(combinedHistory, selectedRange.days)
+    }
+
+    if (showAddDialog) {
+        StepHistoryAddDialog(
+            onAdd = { dateIso, steps ->
+                onAddEntry(dateIso, steps)
+                showAddDialog = false
+            },
+            onDismiss = { showAddDialog = false }
+        )
     }
 
     ModalBottomSheet(
@@ -1334,17 +1441,34 @@ fun StepsHistoryBottomSheet(
                 .padding(horizontal = 20.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text("История шагов", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "История шагов",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.combinedClickable(
+                    onClick = {},
+                    onLongClick = { showAddDialog = true }
+                )
+            )
             Text(
                 "Сравните ежедневные шаги и линию цели.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            if (combinedHistory.isEmpty()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                StepsHistoryRange.values().forEach { range ->
+                    FilterChip(
+                        selected = selectedRange == range,
+                        onClick = { selectedRangeName = range.name },
+                        label = { Text(range.label) }
+                    )
+                }
+            }
+
+            if (filteredHistory.isEmpty()) {
                 Text("Пока нет данных о шагах.")
             } else {
-                StepsHistoryChart(history = combinedHistory, goal = goal)
+                StepsHistoryChart(history = filteredHistory, goal = goal)
 
                 // Получаем цвет цели в composable-контексте
                 val goalLineColor = MaterialTheme.colorScheme.tertiary
@@ -1386,7 +1510,7 @@ fun StepsHistoryBottomSheet(
                 Divider()
 
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    combinedHistory
+                    filteredHistory
                         .sortedByDescending { it.isoDate }
                         .forEach { entry ->
                             val reached = entry.steps >= goal
@@ -1422,7 +1546,6 @@ fun StepsHistoryChart(
     modifier: Modifier = Modifier
 ) {
     val primaryColor = MaterialTheme.colorScheme.primary
-    val successColor = MaterialTheme.colorScheme.secondary
     val goalColor = MaterialTheme.colorScheme.tertiary
     val axisColor = MaterialTheme.colorScheme.outline
     val gridColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
@@ -1533,10 +1656,8 @@ fun StepsHistoryChart(
                         val centerX = paddingLeft + index * stepX + stepX / 2f
                         val barHeight = graphHeight * (entry.steps.toFloat() / displayMax)
                         val top = paddingTop + graphHeight - barHeight
-                        val color = if (entry.steps >= goal) successColor else primaryColor
-
                         drawRoundRect(
-                            color = color,
+                            color = primaryColor,
                             topLeft = Offset(centerX - barWidth / 2f, top),
                             size = Size(barWidth, barHeight),
                             cornerRadius = corner
