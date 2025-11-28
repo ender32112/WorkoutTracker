@@ -96,6 +96,8 @@ import android.app.Notification
 import com.example.workouttracker.MainActivity
 import android.annotation.SuppressLint
 import android.util.Log
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AssistChip
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -1322,6 +1324,25 @@ fun StepEditDialog(
     )
 }
 
+fun validateIsoDate(date: String): String? {
+    // Формат должен быть строго "YYYY-MM-DD"
+    val regex = Regex("""\d{4}-\d{2}-\d{2}""")
+    if (!regex.matches(date)) return "Неверный формат даты"
+
+    return try {
+        val (yyyy, mm, dd) = date.split("-").map { it.toInt() }
+
+        if (mm !in 1..12) return "Месяц должен быть от 01 до 12"
+        if (dd !in 1..31) return "День должен быть от 01 до 31"
+
+        // Проверка валидности календарной даты
+        LocalDate.of(yyyy, mm, dd)
+        null
+    } catch (e: Exception) {
+        "Некорректная дата"
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StepHistoryAddDialog(
@@ -1414,7 +1435,8 @@ fun StepsHistoryBottomSheet(
     var showAddDialog by remember { mutableStateOf(false) }
 
     val selectedRange = remember(selectedRangeName) {
-        runCatching { StepsHistoryRange.valueOf(selectedRangeName) }.getOrDefault(StepsHistoryRange.MONTH)
+        runCatching { StepsHistoryRange.valueOf(selectedRangeName) }
+            .getOrDefault(StepsHistoryRange.MONTH)
     }
 
     val filteredHistory = remember(combinedHistory, selectedRange) {
@@ -1438,7 +1460,8 @@ fun StepsHistoryBottomSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 12.dp),
+                .padding(horizontal = 20.dp, vertical = 12.dp)
+                .verticalScroll(rememberScrollState()),     // ← ВАЖНО: делаем контент шита скроллимым
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
@@ -1470,7 +1493,6 @@ fun StepsHistoryBottomSheet(
             } else {
                 StepsHistoryChart(history = filteredHistory, goal = goal)
 
-                // Получаем цвет цели в composable-контексте
                 val goalLineColor = MaterialTheme.colorScheme.tertiary
 
                 Row(
@@ -1482,7 +1504,10 @@ fun StepsHistoryBottomSheet(
                             modifier = Modifier
                                 .width(24.dp)
                                 .height(4.dp)
-                                .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp))
+                                .background(
+                                    MaterialTheme.colorScheme.primary,
+                                    RoundedCornerShape(2.dp)
+                                )
                         )
                         Spacer(Modifier.width(8.dp))
                         Text("Шаги", style = MaterialTheme.typography.labelMedium)
@@ -1528,7 +1553,12 @@ fun StepsHistoryBottomSheet(
                                             contentDescription = null
                                         )
                                     },
-                                    label = { Text(if (reached) "Цель достигнута" else "Цель не достигнута") }
+                                    label = {
+                                        Text(
+                                            if (reached) "Цель достигнута"
+                                            else "Цель не достигнута"
+                                        )
+                                    }
                                 )
                             }
                         }
@@ -1537,6 +1567,7 @@ fun StepsHistoryBottomSheet(
         }
     }
 }
+
 
 
 @Composable
