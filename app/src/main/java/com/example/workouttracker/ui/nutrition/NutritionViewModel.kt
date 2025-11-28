@@ -3,11 +3,18 @@ package com.example.workouttracker.viewmodel
 import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import com.example.workouttracker.ui.nutrition.NutritionEntry
+import com.example.workouttracker.ui.nutrition.MealPlan
+import com.example.workouttracker.llm.NutritionAiRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.UUID
 
 class NutritionViewModel(application: Application) : AndroidViewModel(application) {
@@ -15,8 +22,19 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     private val authPrefs = application.getSharedPreferences(AuthViewModel.AUTH_PREFS_NAME, Context.MODE_PRIVATE)
     private val userId = authPrefs.getString(AuthViewModel.KEY_CURRENT_USER_ID, null) ?: "guest"
     private val prefs = application.getSharedPreferences("nutrition_prefs_" + userId, Context.MODE_PRIVATE)
+
     private val _entries = MutableStateFlow<List<NutritionEntry>>(emptyList())
     val entries: StateFlow<List<NutritionEntry>> = _entries
+
+    // ---- состояние плана питания ----
+    private val _mealPlan = MutableStateFlow<MealPlan?>(null)
+    val mealPlan: StateFlow<MealPlan?> = _mealPlan
+
+    private val _isPlanLoading = MutableStateFlow(false)
+    val isPlanLoading: StateFlow<Boolean> = _isPlanLoading
+
+    private val _planError = MutableStateFlow<String?>(null)
+    val planError: StateFlow<String?> = _planError
 
     var dailyNorm = mapOf<String, Int>()
 
@@ -46,7 +64,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                         protein = obj.getInt("protein"),
                         carbs = obj.getInt("carbs"),
                         fats = obj.getInt("fats"),
-                        weight = obj.optInt("weight", 100) // обратная совместимость
+                        weight = obj.optInt("weight", 100)
                     )
                 )
             }
@@ -104,5 +122,34 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             putInt("norm_fats",     norm["fats"]     ?: 80)
             apply()
         }
+    }
+
+    // ---- ГЕНЕРАЦИЯ ПЛАНА С LLM ----
+
+    fun generatePlanForToday() {
+        val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        val entriesToday = _entries.value.filter { it.date == today }
+
+        viewModelScope.launch {
+            _isPlanLoading.value = true
+            _planError.value = null
+            try {
+                val plan = NutritionAiRepository.instance.generateMealPlanForDay(
+                    date = today,
+                    dailyNorm = dailyNorm,
+                    entriesToday = entriesToday
+                )
+                _mealPlan.value = plan
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _planError.value = e.message ?: "Ошибка при генерации плана"
+            } finally {
+                _isPlanLoading.value = false
+            }
+        }
+    }
+
+    fun clearPlanError() {
+        _planError.value = null
     }
 }

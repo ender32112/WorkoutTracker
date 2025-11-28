@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
@@ -38,6 +39,9 @@ fun NutritionScreen(
     viewModel: NutritionViewModel = viewModel()
 ) {
     val entries by viewModel.entries.collectAsState()
+    val mealPlan by viewModel.mealPlan.collectAsState()
+    val isPlanLoading by viewModel.isPlanLoading.collectAsState()
+    val planError by viewModel.planError.collectAsState()
 
     var showAddDialog by remember { mutableStateOf(false) }
     var editEntry by remember { mutableStateOf<NutritionEntry?>(null) }
@@ -88,6 +92,15 @@ fun NutritionScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             item { TodayCard(todayTotal, viewModel.dailyNorm) }
+            item {
+                MealPlanCard(
+                    mealPlan = mealPlan,
+                    isLoading = isPlanLoading,
+                    error = planError,
+                    onGenerateClick = { viewModel.generatePlanForToday() },
+                    onDismissError = { viewModel.clearPlanError() }
+                )
+            }
 
             grouped.forEach { (date, list) ->
                 stickyHeader {
@@ -359,3 +372,129 @@ fun NutritionEntryCard(entry: NutritionEntry, onEdit: () -> Unit, onDelete: () -
         }
     }
 }
+
+
+@Composable
+fun MealPlanCard(
+    mealPlan: MealPlan?,
+    isLoading: Boolean,
+    error: String?,
+    onGenerateClick: () -> Unit,
+    onDismissError: () -> Unit
+) {
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        elevation = CardDefaults.elevatedCardElevation(6.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.linearGradient(
+                        listOf(
+                            MaterialTheme.colorScheme.primaryContainer,
+                            MaterialTheme.colorScheme.secondaryContainer
+                        )
+                    )
+                )
+                .padding(16.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "План питания",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                )
+                Button(
+                    onClick = onGenerateClick,
+                    enabled = !isLoading
+                ) {
+                    if (isLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("Генерация...")
+                    } else {
+                        Text(if (mealPlan == null) "Сгенерировать" else "Обновить")
+                    }
+                }
+            }
+
+            if (error != null) {
+                Spacer(Modifier.height(8.dp))
+                Surface(
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = error,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = onDismissError) {
+                            Text("Ок", color = MaterialTheme.colorScheme.onErrorContainer)
+                        }
+                    }
+                }
+            }
+
+            if (mealPlan != null) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = "Цель: ${mealPlan.targetCalories} ккал • Б:${mealPlan.targetProtein} Ж:${mealPlan.targetFat} У:${mealPlan.targetCarbs}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Spacer(Modifier.height(8.dp))
+
+                mealPlan.meals.forEach { meal ->
+                    Spacer(Modifier.height(8.dp))
+                    Surface(
+                        tonalElevation = 1.dp,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(Modifier.padding(10.dp)) {
+                            Text(
+                                text = when (meal.type) {
+                                    MealType.BREAKFAST -> "Завтрак"
+                                    MealType.LUNCH -> "Обед"
+                                    MealType.DINNER -> "Ужин"
+                                    MealType.SNACK -> "Перекус"
+                                },
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            meal.items.forEach { item ->
+                                Text(
+                                    text = "${item.name} — ${item.grams} г, ${item.calories} ккал (Б:${item.protein} Ж:${item.fat} У:${item.carbs})",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+                    }
+                }
+            } else if (!isLoading && error == null) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "План на сегодня ещё не создан.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+    }
+}
+
