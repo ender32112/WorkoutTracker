@@ -11,6 +11,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -43,10 +44,12 @@ fun NutritionScreen(
     val isPlanLoading by viewModel.isPlanLoading.collectAsState()
     val planError by viewModel.planError.collectAsState()
     val recommendedNorm by viewModel.recommendedNorm.collectAsState()
+    val profile by viewModel.profile.collectAsState()
 
     var showAddDialog by remember { mutableStateOf(false) }
     var editEntry by remember { mutableStateOf<NutritionEntry?>(null) }
     var showSettings by remember { mutableStateOf(false) }
+    var showProfileDialog by remember { mutableStateOf(false) }
 
     val snackbarHost = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()                // ← добавили
@@ -80,6 +83,9 @@ fun NutritionScreen(
                 title = "Питание",
                 titleStyle = MaterialTheme.typography.headlineSmall,
                 actions = {
+                    IconButton(onClick = { showProfileDialog = true }) {
+                        Icon(Icons.Filled.Person, contentDescription = "Профиль питания")
+                    }
                     IconButton(onClick = { showSettings = true }) {
                         Icon(Icons.Filled.Settings, contentDescription = "Настройки")
                     }
@@ -201,6 +207,16 @@ fun NutritionScreen(
                 scope.launch { snack("Нормы сохранены") }               // ← заменили LaunchedEffect
             },
             onDismiss = { showSettings = false }
+        )
+    }
+
+    if (showProfileDialog) {
+        ProfileDialog(
+            currentProfile = profile,
+            onSave = { newProfile ->
+                viewModel.updateProfile(newProfile)
+            },
+            onDismiss = { showProfileDialog = false }
         )
     }
 }
