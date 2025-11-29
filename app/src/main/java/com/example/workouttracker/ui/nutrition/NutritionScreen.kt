@@ -112,7 +112,7 @@ fun NutritionScreen(
                     mealPlan = mealPlan,
                     isLoading = isPlanLoading,
                     error = planError,
-                    onGenerateClick = { viewModel.generatePlanForToday() },
+                    onGenerateClick = { viewModel.generateTodayPlan() },
                     onDismissError = { viewModel.clearPlanError() }
                 )
             }
