@@ -294,18 +294,20 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
 
     // ---- ГЕНЕРАЦИЯ ПЛАНА С LLM ----
 
-    fun generatePlanForToday() {
+    fun generateTodayPlan() {
         val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-        val entriesToday = _entries.value.filter { it.date == today }
+        val history = getDailySummaries().take(7)
 
         viewModelScope.launch {
             _isPlanLoading.value = true
             _planError.value = null
             try {
-                val plan = NutritionAiRepository.instance.generateMealPlanForDay(
+                val plan = NutritionAiRepository.instance.generatePersonalizedPlan(
                     date = today,
-                    dailyNorm = dailyNorm,
-                    entriesToday = entriesToday
+                    profile = profile.value,
+                    recommendedNorm = recommendedNorm.value,
+                    userNorm = dailyNorm,
+                    history = history
                 )
                 _mealPlan.value = plan
             } catch (e: Exception) {
