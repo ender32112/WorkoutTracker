@@ -58,6 +58,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -72,6 +73,7 @@ import com.example.workouttracker.ui.nutrition.NutritionEntry
 import com.example.workouttracker.ui.training.ExerciseEntry
 import com.example.workouttracker.viewmodel.AuthViewModel
 import com.example.workouttracker.viewmodel.NutritionViewModel
+import com.example.workouttracker.viewmodel.NutritionViewModel.DailyNutritionSummary
 import com.example.workouttracker.viewmodel.TrainingViewModel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
@@ -498,6 +500,10 @@ fun AnalyticsScreen(
             )
         }
 
+    val dailySummaries = remember(entries) {
+        nutritionViewModel.getDailySummaries()
+    }
+
     /* ---------- Weight history ---------- */
     fun loadWeightHistory(): List<Pair<String, Float>> {
         val json = prefs.getString(K_WEIGHT_JSON, "[]") ?: "[]"
@@ -639,6 +645,7 @@ fun AnalyticsScreen(
             }
             item { WeatherCardPretty(city = city, weather = weather, subtitle = weatherSubtitle) }
             item { NutritionTodayCardPretty(total = todayTotal, norm = nutritionViewModel.dailyNorm) }
+            item { NutritionHistoryBlock(summaries = dailySummaries) }
             item {
                 WeightInputCardPretty(
                     input = weightInput,
@@ -1765,6 +1772,72 @@ fun WeatherCardPretty(city: String, weather: String, subtitle: String?) {
                     Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+    }
+}
+
+@Composable
+fun NutritionHistoryBlock(summaries: List<DailyNutritionSummary>) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = "История питания",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+        )
+
+        if (summaries.isEmpty()) {
+            Text(
+                text = "Пока нет данных",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 320.dp)
+            ) {
+                items(summaries) { summary ->
+                    DailyNutritionRow(summary)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun DailyNutritionRow(summary: DailyNutritionSummary) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        Text(
+            text = formatDate(summary.date),
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.Medium
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = "Калории: ${summary.calories}",
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Text(
+            text = "Б: ${summary.protein} г   Ж: ${summary.fats} г   У: ${summary.carbs} г",
+            style = MaterialTheme.typography.bodyMedium
+        )
+    }
+}
+
+fun formatDate(iso: String): String {
+    return try {
+        val src = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        val dst = SimpleDateFormat("d MMMM", Locale.getDefault())
+        val date = src.parse(iso)
+        if (date != null) dst.format(date) else iso
+    } catch (_: Exception) {
+        iso
     }
 }
 
