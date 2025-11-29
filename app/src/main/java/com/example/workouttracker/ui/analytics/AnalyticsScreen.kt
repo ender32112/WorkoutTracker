@@ -87,6 +87,7 @@ import retrofit2.http.GET
 import retrofit2.http.Query
 import java.text.SimpleDateFormat
 import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import java.util.*
 import java.util.Calendar
 import kotlin.math.max
@@ -504,6 +505,8 @@ fun AnalyticsScreen(
         nutritionViewModel.getDailySummaries()
     }
 
+    var showNutritionHistory by remember { mutableStateOf(false) }
+
     /* ---------- Weight history ---------- */
     fun loadWeightHistory(): List<Pair<String, Float>> {
         val json = prefs.getString(K_WEIGHT_JSON, "[]") ?: "[]"
@@ -645,7 +648,12 @@ fun AnalyticsScreen(
             }
             item { WeatherCardPretty(city = city, weather = weather, subtitle = weatherSubtitle) }
             item { NutritionTodayCardPretty(total = todayTotal, norm = nutritionViewModel.dailyNorm) }
-            item { NutritionHistoryBlock(summaries = dailySummaries) }
+            item {
+                NutritionHistoryBlock(
+                    summaries = dailySummaries,
+                    onOpenHistory = { showNutritionHistory = true }
+                )
+            }
             item {
                 WeightInputCardPretty(
                     input = weightInput,
@@ -760,6 +768,14 @@ fun AnalyticsScreen(
                 scope.launch { showSnack("Значение шагов обновлено") }
             },
             onDismiss = { showStepEditor = false }
+        )
+    }
+
+    if (showNutritionHistory) {
+        NutritionHistoryBottomSheet(
+            summaries = dailySummaries,
+            norm = nutritionViewModel.dailyNorm,
+            onDismiss = { showNutritionHistory = false }
         )
     }
 
@@ -1776,30 +1792,61 @@ fun WeatherCardPretty(city: String, weather: String, subtitle: String?) {
 }
 
 @Composable
-fun NutritionHistoryBlock(summaries: List<DailyNutritionSummary>) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = "История питания",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-        )
+fun NutritionHistoryBlock(
+    summaries: List<DailyNutritionSummary>,
+    onOpenHistory: () -> Unit
+) {
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onOpenHistory,
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+        ),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 1.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "История питания",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "Нажмите, чтобы открыть подробную статистику за прошедшие дни.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                FilledTonalButton(onClick = onOpenHistory) {
+                    Icon(Icons.Default.History, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Открыть")
+                }
+            }
 
-        if (summaries.isEmpty()) {
-            Text(
-                text = "Пока нет данных",
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 320.dp)
-            ) {
-                items(summaries) { summary ->
-                    DailyNutritionRow(summary)
+            if (summaries.isEmpty()) {
+                Text(
+                    text = "Пока нет данных",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                val preview = summaries.take(3)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    preview.forEach { summary ->
+                        NutritionPreviewRow(summary)
+                    }
+                    if (summaries.size > preview.size) {
+                        Text(
+                            text = "Еще ${summaries.size - preview.size} дней ждут просмотра",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
         }
@@ -1807,25 +1854,441 @@ fun NutritionHistoryBlock(summaries: List<DailyNutritionSummary>) {
 }
 
 @Composable
-fun DailyNutritionRow(summary: DailyNutritionSummary) {
+private fun NutritionPreviewRow(summary: DailyNutritionSummary) {
+    val gradient = Brush.horizontalGradient(
+        listOf(
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+            MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f)
+        )
+    )
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        tonalElevation = 2.dp,
+        color = MaterialTheme.colorScheme.surface
+    ) {
+        Box(modifier = Modifier.background(gradient)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = formatDate(summary.date),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(Modifier.weight(1f))
+                    AssistChip(
+                        onClick = {},
+                        label = { Text("${summary.calories} ккал") },
+                        leadingIcon = { Icon(Icons.Default.Whatshot, contentDescription = null) }
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    MacroPill(text = "Б ${summary.protein} г", color = Color(0xFF66BB6A))
+                    MacroPill(text = "Ж ${summary.fats} г", color = Color(0xFFFFA726))
+                    MacroPill(text = "У ${summary.carbs} г", color = Color(0xFF64B5F6))
+                }
+            }
+        }
+    }
+}
+
+private enum class NutritionMetric(
+    val label: String,
+    val unit: String,
+    val normKey: String,
+    val color: Color,
+    val extractor: (DailyNutritionSummary) -> Int
+) {
+    CALORIES("Калории", "ккал", "calories", Color(0xFFFF8A65), { it.calories }),
+    PROTEIN("Белки", "г", "protein", Color(0xFF66BB6A), { it.protein }),
+    FATS("Жиры", "г", "fats", Color(0xFFFFD54F), { it.fats }),
+    CARBS("Углеводы", "г", "carbs", Color(0xFF64B5F6), { it.carbs })
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun NutritionHistoryBottomSheet(
+    summaries: List<DailyNutritionSummary>,
+    norm: Map<String, Int>,
+    onDismiss: () -> Unit
+) {
+    val sortedHistory = remember(summaries) { summaries.sortedBy { it.date } }
+
+    var selectedRangeName by rememberSaveable { mutableStateOf(StepsHistoryRange.MONTH.name) }
+    var selectedMetricName by rememberSaveable { mutableStateOf(NutritionMetric.CALORIES.name) }
+
+    val selectedRange = remember(selectedRangeName) {
+        runCatching { StepsHistoryRange.valueOf(selectedRangeName) }
+            .getOrDefault(StepsHistoryRange.MONTH)
+    }
+    val selectedMetric = remember(selectedMetricName) {
+        runCatching { NutritionMetric.valueOf(selectedMetricName) }
+            .getOrDefault(NutritionMetric.CALORIES)
+    }
+
+    val filteredHistory = remember(sortedHistory, selectedRange) {
+        filterNutritionHistory(sortedHistory, selectedRange.days)
+    }
+    val chartData = remember(filteredHistory, selectedMetric) {
+        filteredHistory.map { isoToPrettyDate(it.date) to selectedMetric.extractor(it) }
+    }
+    val normValue = norm[selectedMetric.normKey]
+    val bestDay = remember(filteredHistory, selectedMetric) {
+        filteredHistory.maxByOrNull { selectedMetric.extractor(it) }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 12.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Text(
+                text = "История питания",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = "Отдельное окно со статистикой калорий и КБЖУ. Меняйте диапазон и метрику, чтобы увидеть тренды.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                StepsHistoryRange.values().forEach { range ->
+                    FilterChip(
+                        selected = selectedRange == range,
+                        onClick = { selectedRangeName = range.name },
+                        label = { Text(range.label) }
+                    )
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                NutritionMetric.values().forEach { metric ->
+                    FilterChip(
+                        selected = selectedMetric == metric,
+                        onClick = { selectedMetricName = metric.name },
+                        label = { Text(metric.label) }
+                    )
+                }
+            }
+
+            ElevatedCard(
+                colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "${selectedMetric.label} за период",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    if (chartData.isEmpty()) {
+                        Text(
+                            text = "Пока нет данных для графика",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        NutritionHistoryChart(
+                            data = chartData,
+                            metric = selectedMetric,
+                            norm = normValue
+                        )
+                    }
+                }
+            }
+
+            bestDay?.let { day ->
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
+                    color = selectedMetric.color.copy(alpha = 0.08f)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text("Лучший день", style = MaterialTheme.typography.labelMedium)
+                        Text(
+                            text = formatDate(day.date),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "${selectedMetric.extractor(day)} ${selectedMetric.unit} — максимум в выбранном диапазоне",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+            }
+
+            Divider()
+
+            Text(
+                text = "Подробные записи",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Medium
+            )
+
+            if (filteredHistory.isEmpty()) {
+                Text(
+                    text = "История пока пуста",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    filteredHistory
+                        .sortedByDescending { it.date }
+                        .forEach { summary ->
+                            NutritionHistoryItemCard(
+                                summary = summary,
+                                metric = selectedMetric,
+                                norm = normValue
+                            )
+                        }
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+        }
+    }
+}
+
+@Composable
+private fun NutritionHistoryItemCard(
+    summary: DailyNutritionSummary,
+    metric: NutritionMetric,
+    norm: Int?
+) {
+    val accent = metric.color
+    val value = metric.extractor(summary)
+    val progress = if (norm != null && norm > 0) value.toFloat() / norm else 0f
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        tonalElevation = 2.dp,
+        color = MaterialTheme.colorScheme.surface
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = formatDate(summary.date),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "${summary.calories} ккал за день",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Text(
+                    text = "$value ${metric.unit}",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = accent
+                )
+            }
+
+            if (norm != null && norm > 0) {
+                LinearProgressIndicator(
+                    progress = progress.coerceIn(0f, 1f),
+                    modifier = Modifier.fillMaxWidth(),
+                    color = accent,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+                Text(
+                    text = "Норма ${norm} ${metric.unit}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                MacroPill(text = "Б ${summary.protein} г", color = Color(0xFF66BB6A))
+                MacroPill(text = "Ж ${summary.fats} г", color = Color(0xFFFFA726))
+                MacroPill(text = "У ${summary.carbs} г", color = Color(0xFF64B5F6))
+            }
+        }
+    }
+}
+
+@Composable
+private fun NutritionHistoryChart(
+    data: List<Pair<String, Int>>,
+    metric: NutritionMetric,
+    norm: Int?,
+    modifier: Modifier = Modifier
+) {
+    val accent = metric.color
+    val axisColor = MaterialTheme.colorScheme.outline
+    val gridColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+    val paddingDp = 24.dp
+    val density = LocalDensity.current
+
+    val values = data.map { it.second }
+    val maxVal = (values + listOfNotNull(norm)).maxOrNull()?.coerceAtLeast(0) ?: 0
+    val displayMax = if (maxVal == 0) 10f else maxVal * 1.15f
+    val stepsY = 4
+
+    val labelIndices: List<Int> = when {
+        data.isEmpty() -> emptyList()
+        data.size == 1 -> listOf(0)
+        data.size == 2 -> listOf(0, 1)
+        else -> listOf(0, data.size / 2, data.lastIndex)
+    }
+
+    val yPaint = remember {
+        android.graphics.Paint().apply {
+            isAntiAlias = true
+            textAlign = android.graphics.Paint.Align.RIGHT
+        }
+    }.also {
+        it.textSize = with(density) { 10.sp.toPx() }
+        it.color = android.graphics.Color.GRAY
+    }
+
+    val xPaint = remember {
+        android.graphics.Paint().apply { isAntiAlias = true }
+    }.also {
+        it.textSize = with(density) { 10.sp.toPx() }
+        it.color = android.graphics.Color.DKGRAY
+    }
+
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .height(240.dp)
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val width = size.width
+            val height = size.height
+            val paddingPx = with(density) { paddingDp.toPx() }
+
+            val approxYTextWidth = yPaint.measureText("${displayMax.toInt()}")
+            val paddingLeft = max(paddingPx, approxYTextWidth + paddingPx * 0.3f)
+            val paddingRight = paddingPx * 0.6f
+            val paddingTop = paddingPx * 0.6f
+            val paddingBottom = paddingPx * 1.1f
+
+            val graphWidth = (width - paddingLeft - paddingRight).coerceAtLeast(1f)
+            val graphHeight = (height - paddingTop - paddingBottom).coerceAtLeast(1f)
+
+            // Оси
+            drawLine(axisColor, Offset(paddingLeft, paddingTop), Offset(paddingLeft, height - paddingBottom), 2f)
+            drawLine(axisColor, Offset(paddingLeft, height - paddingBottom), Offset(width - paddingRight, height - paddingBottom), 2f)
+
+            // Сетка и подписи Y
+            for (i in 0..stepsY) {
+                val fy = i / stepsY.toFloat()
+                val y = paddingTop + graphHeight * (1f - fy)
+                drawLine(gridColor, Offset(paddingLeft, y), Offset(width - paddingRight, y), 1f)
+
+                val value = displayMax * fy
+                val label = "${value.toInt()}"
+                val fm = yPaint.fontMetrics
+                val baseline = y - (fm.ascent + fm.descent) / 2f
+                drawContext.canvas.nativeCanvas.drawText(label, paddingLeft - 8f, baseline, yPaint)
+            }
+
+            // Норма
+            norm?.let {
+                if (it > 0) {
+                    val y = paddingTop + graphHeight * (1f - it / displayMax)
+                    drawLine(
+                        color = accent.copy(alpha = 0.6f),
+                        start = Offset(paddingLeft, y),
+                        end = Offset(width - paddingRight, y),
+                        strokeWidth = 4f,
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 8f))
+                    )
+                }
+            }
+
+            if (data.isNotEmpty()) {
+                val stepX = graphWidth / data.size
+                val barWidth = stepX * 0.55f
+
+                data.forEachIndexed { index, (label, value) ->
+                    val xCenter = paddingLeft + index * stepX + stepX / 2f
+                    val normalized = (value / displayMax).coerceIn(0f, 1f)
+                    val barHeight = graphHeight * normalized
+                    val top = paddingTop + graphHeight - barHeight
+
+                    drawRoundRect(
+                        brush = Brush.verticalGradient(
+                            listOf(accent.copy(alpha = 0.9f), accent.copy(alpha = 0.6f))
+                        ),
+                        topLeft = Offset(xCenter - barWidth / 2f, top),
+                        size = Size(barWidth, barHeight),
+                        cornerRadius = CornerRadius(12f, 12f)
+                    )
+
+                    if (index in labelIndices) {
+                        val fm = xPaint.fontMetrics
+                        val textY = height - paddingBottom + (-fm.ascent + fm.descent)
+                        drawContext.canvas.nativeCanvas.drawText(label, xCenter, textY, xPaint.apply {
+                            textAlign = android.graphics.Paint.Align.CENTER
+                        })
+                    }
+                }
+            }
+        }
+    }
+}
+
+private val isoDateFormatter: DateTimeFormatter = DateTimeFormatter.ISO_DATE
+
+private fun filterNutritionHistory(
+    history: List<DailyNutritionSummary>,
+    days: Long
+): List<DailyNutritionSummary> {
+    if (history.isEmpty()) return emptyList()
+
+    val today = LocalDate.now()
+    val start = today.minusDays(days - 1)
+
+    return history.filter { summary ->
+        runCatching { LocalDate.parse(summary.date, isoDateFormatter) }
+            .getOrNull()
+            ?.let { date -> date >= start }
+            ?: false
+    }.sortedBy { it.date }
+}
+
+@Composable
+private fun MacroPill(text: String, color: Color) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(color.copy(alpha = 0.15f))
+            .padding(horizontal = 10.dp, vertical = 6.dp)
     ) {
         Text(
-            text = formatDate(summary.date),
-            style = MaterialTheme.typography.bodyLarge,
-            fontWeight = FontWeight.Medium
-        )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = "Калории: ${summary.calories}",
-            style = MaterialTheme.typography.bodyMedium
-        )
-        Text(
-            text = "Б: ${summary.protein} г   Ж: ${summary.fats} г   У: ${summary.carbs} г",
-            style = MaterialTheme.typography.bodyMedium
+            text = text,
+            style = MaterialTheme.typography.labelMedium,
+            color = color,
+            fontWeight = FontWeight.SemiBold
         )
     }
 }
