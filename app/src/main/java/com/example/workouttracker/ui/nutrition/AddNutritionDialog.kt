@@ -37,7 +37,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import java.text.SimpleDateFormat
@@ -200,6 +202,7 @@ fun AddNutritionDialog(
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium)
                     )
                     Spacer(Modifier.height(8.dp))
+
                     val mealTypeLabels = mapOf(
                         MealType.BREAKFAST to "Завтрак",
                         MealType.LUNCH to "Обед",
@@ -207,7 +210,12 @@ fun AddNutritionDialog(
                         MealType.SNACK to "Перекус",
                         MealType.OTHER to "Другое"
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
                         mealTypeLabels.forEach { (type, label) ->
                             FilterChip(
                                 selected = mealType == type,
@@ -361,21 +369,45 @@ fun AddNutritionDialog(
                 item {
                     ElevatedCard(
                         modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface)
+                        colors = CardDefaults.elevatedCardColors(
+                            containerColor = MaterialTheme.colorScheme.surface
+                        )
                     ) {
                         Column(Modifier.padding(12.dp)) {
-                            Text("Блюдо (на 100 г)", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                            Row(
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = "Блюдо (на 100 г)",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                                )
+                                if (totalWeightDish > 0) {
+                                    Text(
+                                        text = "$totalWeightDish г всего",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+
                             Spacer(Modifier.height(6.dp))
-                            Text(
-                                "${dishCaloriesPer100g} ккал, ${dishProteinPer100g} г белков, ${dishFatsPer100g} г жиров, ${dishCarbsPer100g} г углеводов",
-                                style = MaterialTheme.typography.bodyMedium
-                            )
+
                             if (totalWeightDish == 0) {
                                 Text(
                                     "Добавьте вес ингредиентов, чтобы рассчитать блюдо",
                                     color = MaterialTheme.colorScheme.error,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    modifier = Modifier.padding(top = 4.dp)
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            } else {
+                                Text(
+                                    text = "Калории: $dishCaloriesPer100g ккал",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Spacer(Modifier.height(2.dp))
+                                Text(
+                                    text = "Б: $dishProteinPer100g г   Ж: $dishFatsPer100g г   У: $dishCarbsPer100g г",
+                                    style = MaterialTheme.typography.bodyMedium
                                 )
                             }
                         }
