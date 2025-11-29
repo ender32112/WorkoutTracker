@@ -42,6 +42,7 @@ fun NutritionScreen(
     val mealPlan by viewModel.mealPlan.collectAsState()
     val isPlanLoading by viewModel.isPlanLoading.collectAsState()
     val planError by viewModel.planError.collectAsState()
+    val recommendedNorm by viewModel.recommendedNorm.collectAsState()
 
     var showAddDialog by remember { mutableStateOf(false) }
     var editEntry by remember { mutableStateOf<NutritionEntry?>(null) }
@@ -193,6 +194,7 @@ fun NutritionScreen(
     if (showSettings) {
         SettingsDialog(
             currentNorm = viewModel.dailyNorm,
+            recommendedNorm = recommendedNorm,
             onSave = { norm ->
                 viewModel.updateNorm(norm)
                 showSettings = false

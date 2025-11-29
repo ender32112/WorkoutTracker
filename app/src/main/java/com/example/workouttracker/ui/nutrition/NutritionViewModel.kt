@@ -10,6 +10,10 @@ import com.example.workouttracker.ui.nutrition.Ingredient
 import com.example.workouttracker.ui.nutrition.MealPlan
 import com.example.workouttracker.ui.nutrition.MealType
 import com.example.workouttracker.ui.nutrition.NutritionEntry
+import com.example.workouttracker.ui.nutrition.NutritionCalculator
+import com.example.workouttracker.ui.nutrition.NutritionProfile
+import com.example.workouttracker.ui.nutrition.Norm
+import com.example.workouttracker.ui.nutrition.ProfileRepository
 import com.example.workouttracker.llm.NutritionAiRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -26,6 +30,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     private val authPrefs = application.getSharedPreferences(AuthViewModel.AUTH_PREFS_NAME, Context.MODE_PRIVATE)
     private val userId = authPrefs.getString(AuthViewModel.KEY_CURRENT_USER_ID, null) ?: "guest"
     private val prefs = application.getSharedPreferences("nutrition_prefs_" + userId, Context.MODE_PRIVATE)
+    private val profileRepository = ProfileRepository(application.applicationContext)
 
     private val _entries = MutableStateFlow<List<NutritionEntry>>(emptyList())
     val entries: StateFlow<List<NutritionEntry>> = _entries
@@ -39,6 +44,12 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val _planError = MutableStateFlow<String?>(null)
     val planError: StateFlow<String?> = _planError
+
+    private val _profile = MutableStateFlow<NutritionProfile?>(null)
+    val profile: StateFlow<NutritionProfile?> = _profile
+
+    private val _recommendedNorm = MutableStateFlow<Norm?>(null)
+    val recommendedNorm: StateFlow<Norm?> = _recommendedNorm
 
     var dailyNorm = mapOf<String, Int>()
 
@@ -57,6 +68,8 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             "carbs"    to prefs.getInt("norm_carbs", 300),
             "fats"     to prefs.getInt("norm_fats", 80)
         )
+        _profile.value = profileRepository.loadProfile()
+        _recommendedNorm.value = _profile.value?.let { NutritionCalculator.calculateRecommendedNorm(it) }
         loadEntries()
     }
 
@@ -260,6 +273,12 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     fun updateEntry(updated: NutritionEntry) {
         _entries.value = _entries.value.map { if (it.id == updated.id) updated else it }
         saveEntries()
+    }
+
+    fun updateProfile(profile: NutritionProfile) {
+        _profile.value = profile
+        _recommendedNorm.value = NutritionCalculator.calculateRecommendedNorm(profile)
+        profileRepository.saveProfile(profile)
     }
 
     fun updateNorm(norm: Map<String, Int>) {
