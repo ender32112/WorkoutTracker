@@ -2,9 +2,12 @@ package com.example.workouttracker.llm
 
 import com.example.workouttracker.ui.nutrition.MealPlan
 import com.example.workouttracker.ui.nutrition.MealType
-import com.example.workouttracker.ui.nutrition.NutritionEntry
+import com.example.workouttracker.ui.nutrition.NutritionProfile
+import com.example.workouttracker.ui.nutrition.Norm
 import com.example.workouttracker.ui.nutrition.PlannedFoodItem
 import com.example.workouttracker.ui.nutrition.PlannedMeal
+import com.example.workouttracker.ui.nutrition.Goal
+import com.example.workouttracker.viewmodel.NutritionViewModel
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import kotlinx.coroutines.Dispatchers
@@ -14,6 +17,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.logging.HttpLoggingInterceptor
+import kotlin.math.roundToInt
 import java.util.Locale
 
 // ---------- DTO для OpenAI-совместимого API ----------
@@ -82,80 +86,119 @@ class NutritionAiRepository private constructor() {
 
     // ---------- Публичный метод ----------
 
-    suspend fun generateMealPlanForDay(
+    suspend fun generatePersonalizedPlan(
         date: String,
-        dailyNorm: Map<String, Int>,
-        entriesToday: List<NutritionEntry>
+        profile: NutritionProfile?,
+        recommendedNorm: Norm?,
+        userNorm: Map<String, Int>?,
+        history: List<NutritionViewModel.DailyNutritionSummary>
     ): MealPlan = withContext(Dispatchers.IO) {
 
-        val calories = dailyNorm["calories"] ?: 2000
-        val protein  = dailyNorm["protein"]  ?: 120
-        val fats     = dailyNorm["fats"]     ?: 70
-        val carbs    = dailyNorm["carbs"]    ?: 250
+        val defaultNorm = mapOf(
+            "calories" to 2000,
+            "protein" to 120,
+            "fats" to 70,
+            "carbs" to 250
+        )
 
-        // История за день в JSON, чтобы модель видела, что уже съедено
-        val historyJson = gson.toJson(entriesToday.map {
-            mapOf(
-                "name" to it.name,
-                "calories" to it.calories,
-                "protein" to it.protein,
-                "fat" to it.fats,
-                "carbs" to it.carbs,
-                "weight" to it.weight
-            )
-        })
+        val targetCaloriesBase = recommendedNorm?.calories
+            ?: userNorm?.get("calories")
+            ?: defaultNorm.getValue("calories")
+        val targetProteinBase = recommendedNorm?.protein
+            ?: userNorm?.get("protein")
+            ?: defaultNorm.getValue("protein")
+        val targetFatsBase = recommendedNorm?.fats
+            ?: userNorm?.get("fats")
+            ?: defaultNorm.getValue("fats")
+        val targetCarbsBase = recommendedNorm?.carbs
+            ?: userNorm?.get("carbs")
+            ?: defaultNorm.getValue("carbs")
+
+        val historyWindow = history.take(7)
+        val avgCalories = historyWindow.takeIf { it.isNotEmpty() }?.map { it.calories }?.average()
+        val calorieDiff = avgCalories?.minus(targetCaloriesBase)
+        val calorieAdjustment = calorieDiff?.let { (-it).coerceIn(-400.0, 400.0) } ?: 0.0
+        val adjustedCalories = (targetCaloriesBase + calorieAdjustment).roundToInt().coerceAtLeast(1500)
+
+        val profileDescription = profile?.let {
+            "Пол: ${if (it.sex.name == "MALE") "мужчина" else "женщина"}, " +
+                "${it.age} лет, рост ${it.heightCm} см, вес ${it.weightKg} кг, цель — ${goalToText(it.goal)}.\n" +
+                "Любимые продукты: ${it.favoriteIngredients.joinToString().ifEmpty { "не указаны" }}.\n" +
+                "Нелюбимые продукты: ${it.dislikedIngredients.joinToString().ifEmpty { "нет" }}.\n" +
+                "Аллергии: ${it.allergies.joinToString().ifEmpty { "нет" }}."
+        } ?: "Профиль пользователя неизвестен (пол, возраст, рост, вес, цель не указаны)."
+
+        val recommendedNormText = recommendedNorm?.let {
+            "Рекомендуемая норма: ${it.calories} ккал, белки ${it.protein} г, жиры ${it.fats} г, углеводы ${it.carbs} г."
+        } ?: "Рекомендуемая норма неизвестна."
+
+        val userNormText = userNorm?.let {
+            "Пользовательская норма: ${it["calories"] ?: "?"} ккал, белки ${it["protein"] ?: "?"} г, жиры ${it["fats"] ?: "?"} г, углеводы ${it["carbs"] ?: "?"} г."
+        } ?: "Пользовательская норма не задана."
+
+        val historyDetails = if (historyWindow.isNotEmpty()) {
+            historyWindow.joinToString(separator = "\n") { h ->
+                "- ${h.date}: ${h.calories} ккал (Б:${h.protein}, Ж:${h.fats}, У:${h.carbs})"
+            }
+        } else {
+            "История питания за последние дни отсутствует."
+        }
+
+        val historySummary = calorieDiff?.let {
+            when {
+                it > 50 -> "За последние ${historyWindow.size} дней пользователь в среднем переедал примерно на ${it.roundToInt()} ккал. Сделай план сегодня примерно на ${calorieAdjustment.roundToInt().let { adj -> if (adj < 0) -adj else 0 }} ккал ниже базовой цели, но не опускайся ниже 1500 ккал."
+                it < -50 -> "За последние ${historyWindow.size} дней пользователь в среднем недоедал примерно на ${(-it).roundToInt()} ккал. Добавь немного калорий к плану, но оставайся в разумных пределах здоровья."
+                else -> "Последние дни близки к целевой норме, придерживайся базовой цели."
+            }
+        } ?: "История отсутствует, используй базовую цель."
 
         val systemPrompt = """
-            Ты — диетолог и нутриционист.
-            Твоя задача — СТРОГО вернуть ОДИН JSON-объект плана питания на день, без пояснений и текста вокруг.
-            
-            Формат JSON:
+            Ты диетолог и нутриционист. Тебе нужно составить персонализированный план питания на день.
+            Ты ДОЛЖЕН ответить строго в формате JSON, без Markdown и без дополнительного текста.
+            Формат ответа:
             {
-              "date": "2025-11-19",
-              "targetCalories": 2000,
-              "targetProtein": 120,
-              "targetFat": 70,
-              "targetCarbs": 250,
               "meals": [
                 {
-                  "type": "BREAKFAST",
+                  "mealType": "BREAKFAST" | "LUNCH" | "DINNER" | "SNACK" | "OTHER",
                   "items": [
                     {
-                      "name": "Овсяная каша на молоке",
-                      "grams": 250,
+                      "name": "Овсянка с ягодами",
                       "calories": 350,
                       "protein": 15,
-                      "fat": 8,
-                      "carbs": 55
+                      "fats": 10,
+                      "carbs": 50
                     }
                   ]
                 }
               ]
             }
-            
-            Правила:
-            - "type" только из: "BREAKFAST", "LUNCH", "DINNER", "SNACK".
-            - "grams" — целое число.
-            - "calories", "protein", "fat", "carbs" — целые числа.
-            - Суммарные калории и макросы за день должны быть БЛИЗКИ к целевым, но не сильно превышать норму.
-            ВАЖНО: верни ТОЛЬКО JSON, без комментариев, без Markdown, без текста до или после.
+
+            Обязательные требования:
+            - Верни только JSON без пояснений.
+            - Суммарные калории и макроэлементы по всем блюдам должны быть близки к целевой норме.
+            - Используй несколько приёмов пищи (завтрак, обед, ужин, перекусы), в каждом 1–3 блюда.
+            - Никогда не предлагай блюда, содержащие указанные аллергены.
+            - По возможности избегай нелюбимых продуктов.
         """.trimIndent()
 
         val userPrompt = """
             Дата: $date
-            
-            Целевые нормы на день:
-            - Калории: $calories
-            - Белки: $protein
-            - Жиры: $fats
-            - Углеводы: $carbs
-            
-            Уже съедено за этот день (может быть пустым массивом):
-            $historyJson
-            
-            Составь план питания на оставшийся день так, чтобы суммарно за день
-            максимально приблизиться к целям по калориям и макросам.
-            Если история пустая — составь полный план на весь день.
+
+            Профиль:
+            $profileDescription
+
+            Целевые нормы:
+            $recommendedNormText
+            $userNormText
+            Основная целевая калорийность для плана (с учётом корректировки): примерно $adjustedCalories ккал.
+            Старайся ориентироваться на пользовательскую норму, но учитывай рекомендации и цель (похудение/набор/поддержание).
+
+            История питания (последние ${historyWindow.size} дней):
+            $historyDetails
+            $historySummary
+
+            Задача: составь план питания на сегодняшний день, приблизься к целевой норме (калории и макросы), слегка скорректировав калорийность с учётом истории, без экстремальных ограничений.
+            Верни только JSON в указанном формате.
         """.trimIndent()
 
         val requestBody = ChatCompletionRequest(
@@ -191,31 +234,40 @@ class NutritionAiRepository private constructor() {
         val content = chatResponse.choices.firstOrNull()?.message?.content
             ?: throw IllegalStateException("Пустой content в ответе модели")
 
-        // content должен быть чистым JSON. Парсим его.
         val json = gson.fromJson(content, JsonObject::class.java)
 
-        val respDate = json.get("date")?.asString ?: date
-        val respCals = json.get("targetCalories")?.asInt ?: calories
-        val respProt = json.get("targetProtein")?.asInt ?: protein
-        val respFat  = json.get("targetFat")?.asInt ?: fats
-        val respCarb = json.get("targetCarbs")?.asInt ?: carbs
+        val respCals = json.get("targetCalories")?.asInt ?: adjustedCalories
+        val respProt = json.get("targetProtein")?.asInt ?: targetProteinBase
+        val respFat = json.get("targetFat")?.asInt ?: targetFatsBase
+        val respCarb = json.get("targetCarbs")?.asInt ?: targetCarbsBase
 
         val mealsJson = json.getAsJsonArray("meals")
+            ?: throw IllegalStateException("Не удалось найти массив meals в ответе модели")
         val meals = mealsJson.map { mealElement ->
             val mealObj = mealElement.asJsonObject
-            val typeStr = mealObj.get("type").asString
+            val typeStr = when {
+                mealObj.has("mealType") -> mealObj.get("mealType").asString
+                mealObj.has("type") -> mealObj.get("type").asString
+                else -> throw IllegalStateException("У приёма пищи отсутствует поле mealType/type")
+            }
             val type = MealType.valueOf(typeStr.uppercase(Locale.ROOT))
 
             val itemsJson = mealObj.getAsJsonArray("items")
+                ?: throw IllegalStateException("У приёма пищи нет массива items")
             val items = itemsJson.map { itemElement ->
                 val it = itemElement.asJsonObject
                 PlannedFoodItem(
-                    name = it.get("name").asString,
-                    grams = it.get("grams").asInt,
-                    calories = it.get("calories").asInt,
-                    protein = it.get("protein").asInt,
-                    fat = it.get("fat").asInt,
-                    carbs = it.get("carbs").asInt
+                    name = it.get("name")?.asString
+                        ?: throw IllegalStateException("У блюда нет имени"),
+                    grams = it.get("grams")?.asInt ?: 0,
+                    calories = it.get("calories")?.asInt
+                        ?: throw IllegalStateException("У блюда нет калорийности"),
+                    protein = it.get("protein")?.asInt
+                        ?: throw IllegalStateException("У блюда нет белков"),
+                    fat = it.get("fat")?.asInt ?: it.get("fats")?.asInt
+                        ?: throw IllegalStateException("У блюда нет жиров"),
+                    carbs = it.get("carbs")?.asInt
+                        ?: throw IllegalStateException("У блюда нет углеводов")
                 )
             }
 
@@ -226,13 +278,19 @@ class NutritionAiRepository private constructor() {
         }
 
         MealPlan(
-            date = respDate,
+            date = date,
             targetCalories = respCals,
             targetProtein = respProt,
             targetFat = respFat,
             targetCarbs = respCarb,
             meals = meals
         )
+    }
+
+    private fun goalToText(goal: Goal): String = when (goal) {
+        Goal.LOSE_WEIGHT -> "похудение"
+        Goal.MAINTAIN_WEIGHT -> "поддержание веса"
+        Goal.GAIN_WEIGHT -> "набор веса"
     }
 
     companion object {

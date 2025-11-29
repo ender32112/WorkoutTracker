@@ -104,6 +104,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AssistChip
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
@@ -1816,7 +1817,7 @@ fun NutritionHistoryBlock(
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = "Нажмите, чтобы открыть подробную статистику за прошедшие дни.",
+                        text = "",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1905,7 +1906,7 @@ private enum class NutritionMetric(
     val color: Color,
     val extractor: (DailyNutritionSummary) -> Int
 ) {
-    CALORIES("Калории", "ккал", "calories", Color(0xFFFF8A65), { it.calories }),
+    CALORIES("Каллории", "ккал", "calories", Color(0xFFFF8A65), { it.calories }),
     PROTEIN("Белки", "г", "protein", Color(0xFF66BB6A), { it.protein }),
     FATS("Жиры", "г", "fats", Color(0xFFFFD54F), { it.fats }),
     CARBS("Углеводы", "г", "carbs", Color(0xFF64B5F6), { it.carbs })
@@ -1975,12 +1976,22 @@ fun NutritionHistoryBottomSheet(
                 }
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 NutritionMetric.values().forEach { metric ->
                     FilterChip(
                         selected = selectedMetric == metric,
                         onClick = { selectedMetricName = metric.name },
-                        label = { Text(metric.label) }
+                        label = {
+                            Text(
+                                text = metric.label,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     )
                 }
             }
