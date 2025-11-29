@@ -101,24 +101,36 @@ class NutritionAiRepository private constructor() {
             "carbs" to 250
         )
 
-        val targetCaloriesBase = recommendedNorm?.calories
-            ?: userNorm?.get("calories")
+        val targetCaloriesBase = userNorm?.get("calories")
+            ?: recommendedNorm?.calories
             ?: defaultNorm.getValue("calories")
-        val targetProteinBase = recommendedNorm?.protein
-            ?: userNorm?.get("protein")
+
+        val targetProteinBase = userNorm?.get("protein")
+            ?: recommendedNorm?.protein
             ?: defaultNorm.getValue("protein")
-        val targetFatsBase = recommendedNorm?.fats
-            ?: userNorm?.get("fats")
+
+        val targetFatsBase = userNorm?.get("fats")
+            ?: recommendedNorm?.fats
             ?: defaultNorm.getValue("fats")
-        val targetCarbsBase = recommendedNorm?.carbs
-            ?: userNorm?.get("carbs")
+
+        val targetCarbsBase = userNorm?.get("carbs")
+            ?: recommendedNorm?.carbs
             ?: defaultNorm.getValue("carbs")
 
         val historyWindow = history.take(7)
         val avgCalories = historyWindow.takeIf { it.isNotEmpty() }?.map { it.calories }?.average()
         val calorieDiff = avgCalories?.minus(targetCaloriesBase)
         val calorieAdjustment = calorieDiff?.let { (-it).coerceIn(-400.0, 400.0) } ?: 0.0
-        val adjustedCalories = (targetCaloriesBase + calorieAdjustment).roundToInt().coerceAtLeast(1500)
+        val adjustedCaloriesDouble = (targetCaloriesBase + calorieAdjustment).coerceAtLeast(1500.0)
+        val adjustedCalories = adjustedCaloriesDouble.roundToInt()
+
+// коэффициент, во сколько раз изменилась калорийность
+        val scale = adjustedCaloriesDouble / targetCaloriesBase.toDouble()
+
+// масштабируем макросы пропорционально
+        val adjustedProtein = (targetProteinBase * scale).roundToInt().coerceAtLeast(0)
+        val adjustedFats    = (targetFatsBase * scale).roundToInt().coerceAtLeast(0)
+        val adjustedCarbs   = (targetCarbsBase * scale).roundToInt().coerceAtLeast(0)
 
         val profileDescription = profile?.let {
             "Пол: ${if (it.sex.name == "MALE") "мужчина" else "женщина"}, " +
@@ -135,6 +147,10 @@ class NutritionAiRepository private constructor() {
         val userNormText = userNorm?.let {
             "Пользовательская норма: ${it["calories"] ?: "?"} ккал, белки ${it["protein"] ?: "?"} г, жиры ${it["fats"] ?: "?"} г, углеводы ${it["carbs"] ?: "?"} г."
         } ?: "Пользовательская норма не задана."
+
+        val effectiveNormText =
+            "Эффективная цель с учётом истории: $adjustedCalories ккал, белки $adjustedProtein г, жиры $adjustedFats г, углеводы $adjustedCarbs г."
+
 
         val historyDetails = if (historyWindow.isNotEmpty()) {
             historyWindow.joinToString(separator = "\n") { h ->
@@ -163,6 +179,7 @@ class NutritionAiRepository private constructor() {
                   "items": [
                     {
                       "name": "Овсянка с ягодами",
+                      "grams": 250,
                       "calories": 350,
                       "protein": 15,
                       "fats": 10,
@@ -190,7 +207,10 @@ class NutritionAiRepository private constructor() {
             Целевые нормы:
             $recommendedNormText
             $userNormText
-            Основная целевая калорийность для плана (с учётом корректировки): примерно $adjustedCalories ккал.
+            $effectiveNormText
+
+            Считай именно эту эффективную цель основной при составлении плана.
+
             Старайся ориентироваться на пользовательскую норму, но учитывай рекомендации и цель (похудение/набор/поддержание).
 
             История питания (последние ${historyWindow.size} дней):
@@ -234,12 +254,25 @@ class NutritionAiRepository private constructor() {
         val content = chatResponse.choices.firstOrNull()?.message?.content
             ?: throw IllegalStateException("Пустой content в ответе модели")
 
-        val json = gson.fromJson(content, JsonObject::class.java)
+// content может быть либо уже JSON-объектом, либо строкой с JSON внутри
+        val rootElement = gson.fromJson(content, com.google.gson.JsonElement::class.java)
 
-        val respCals = json.get("targetCalories")?.asInt ?: adjustedCalories
-        val respProt = json.get("targetProtein")?.asInt ?: targetProteinBase
-        val respFat = json.get("targetFat")?.asInt ?: targetFatsBase
-        val respCarb = json.get("targetCarbs")?.asInt ?: targetCarbsBase
+        val json: JsonObject = when {
+            rootElement.isJsonObject -> rootElement.asJsonObject
+            rootElement.isJsonPrimitive && rootElement.asJsonPrimitive.isString -> {
+                // content = "\"{...}\"" → достаём строку и парсим ещё раз как объект
+                val inner = rootElement.asJsonPrimitive.asString
+                gson.fromJson(inner, JsonObject::class.java)
+            }
+            else -> {
+                throw IllegalStateException("Ожидался JSON-объект плана, но пришло: $rootElement")
+            }
+        }
+
+        val respCals = adjustedCalories
+        val respProt = adjustedProtein
+        val respFat  = adjustedFats
+        val respCarb = adjustedCarbs
 
         val mealsJson = json.getAsJsonArray("meals")
             ?: throw IllegalStateException("Не удалось найти массив meals в ответе модели")
