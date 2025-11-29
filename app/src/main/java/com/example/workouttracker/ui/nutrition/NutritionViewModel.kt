@@ -42,6 +42,14 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
 
     var dailyNorm = mapOf<String, Int>()
 
+    data class DailyNutritionSummary(
+        val date: String,
+        val calories: Int,
+        val protein: Int,
+        val fats: Int,
+        val carbs: Int
+    )
+
     init {
         dailyNorm = mapOf(
             "calories" to prefs.getInt("norm_calories", 2500),
@@ -50,6 +58,23 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             "fats"     to prefs.getInt("norm_fats", 80)
         )
         loadEntries()
+    }
+
+    fun getEntriesByDate(date: String): Map<MealType, List<NutritionEntry>> {
+        return entries.value
+            .filter { it.date == date }
+            .groupBy { it.mealType }
+    }
+
+    fun getDailySummary(date: String): DailyNutritionSummary {
+        val list = entries.value.filter { it.date == date }
+        return DailyNutritionSummary(
+            date = date,
+            calories = list.sumOf { it.calories },
+            protein = list.sumOf { it.protein },
+            fats = list.sumOf { it.fats },
+            carbs = list.sumOf { it.carbs }
+        )
     }
 
     private fun loadEntries() {

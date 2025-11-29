@@ -52,18 +52,26 @@ fun NutritionScreen(
     suspend fun snack(msg: String) { snackbarHost.showSnackbar(msg) }
 
     val grouped = entries.groupBy { it.date }.toSortedMap(compareByDescending { it })
+    val mealTypeOrder = listOf(
+        MealType.BREAKFAST,
+        MealType.LUNCH,
+        MealType.DINNER,
+        MealType.SNACK,
+        MealType.OTHER
+    )
     val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-    val todayTotal = grouped[today]?.fold(
-        NutritionEntry(date = today, name = "", calories = 0, protein = 0, carbs = 0, fats = 0, weight = 0)
-    ) { acc, e ->
-        acc.copy(
-            calories = acc.calories + e.calories,
-            protein = acc.protein + e.protein,
-            carbs = acc.carbs + e.carbs,
-            fats = acc.fats + e.fats,
-            weight = acc.weight + e.weight
-        )
-    } ?: NutritionEntry(date = today, name = "", calories = 0, protein = 0, carbs = 0, fats = 0, weight = 0)
+    val todayEntries = grouped[today].orEmpty()
+    val todaySummary = viewModel.getDailySummary(today)
+    val todayTotal = NutritionEntry(
+        date = todaySummary.date,
+        name = if (todayEntries.isEmpty()) "" else "Итого",
+        calories = todaySummary.calories,
+        protein = todaySummary.protein,
+        carbs = todaySummary.carbs,
+        fats = todaySummary.fats,
+        weight = todayEntries.sumOf { it.weight }
+    )
+
 
     Scaffold(
         topBar = {
@@ -102,7 +110,7 @@ fun NutritionScreen(
                 )
             }
 
-            grouped.forEach { (date, list) ->
+            grouped.forEach { (date, _) ->
                 stickyHeader {
                     Surface(tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
                         Box(
@@ -126,15 +134,26 @@ fun NutritionScreen(
                     }
                 }
 
-                items(list, key = { it.id }) { entry ->
-                    NutritionEntryCard(
-                        entry = entry,
-                        onEdit = { editEntry = entry },
-                        onDelete = {
-                            viewModel.removeEntry(entry.id)
-                            scope.launch { snack("Удалено: ${entry.name}") }   // ← заменили LaunchedEffect
+                val byMealType = viewModel.getEntriesByDate(date)
+
+                mealTypeOrder.forEach { type ->
+                    val entriesForType = byMealType[type].orEmpty()
+                    if (entriesForType.isNotEmpty()) {
+                        item { MealTypeHeader(type) }
+
+                        items(entriesForType, key = { it.id }) { entry ->
+                            NutritionEntryCard(
+                                entry = entry,
+                                onEdit = { editEntry = entry },
+                                onDelete = {
+                                    viewModel.removeEntry(entry.id)
+                                    scope.launch { snack("Удалено: ${entry.name}") }   // ← заменили LaunchedEffect
+                                }
+                            )
                         }
-                    )
+
+                        item { Spacer(Modifier.height(8.dp)) }
+                    }
                 }
             }
 
@@ -186,6 +205,16 @@ fun NutritionScreen(
 
 
 /* ===== Вспомогательные UI ===== */
+
+@Composable
+fun MealTypeHeader(type: MealType) {
+    Text(
+        text = type.displayName(),
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.padding(vertical = 4.dp)
+    )
+}
 
 @Composable
 fun TodayCard(todayTotal: NutritionEntry, norm: Map<String, Int>) {
@@ -469,12 +498,7 @@ fun MealPlanCard(
                     ) {
                         Column(Modifier.padding(10.dp)) {
                             Text(
-                                text = when (meal.type) {
-                                    MealType.BREAKFAST -> "Завтрак"
-                                    MealType.LUNCH -> "Обед"
-                                    MealType.DINNER -> "Ужин"
-                                    MealType.SNACK -> "Перекус"
-                                },
+                                text = meal.type.displayName(),
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
                             )
                             Spacer(Modifier.height(4.dp))

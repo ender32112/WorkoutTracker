@@ -109,6 +109,14 @@ enum class MealType {
     BREAKFAST, LUNCH, DINNER, SNACK, OTHER
 }
 
+fun MealType.displayName(): String = when (this) {
+    MealType.BREAKFAST -> "Завтрак"
+    MealType.LUNCH -> "Обед"
+    MealType.DINNER -> "Ужин"
+    MealType.SNACK -> "Перекус"
+    MealType.OTHER -> "Другое"
+}
+
 data class PlannedFoodItem(
     val name: String,
     val grams: Int,

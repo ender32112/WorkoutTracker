@@ -464,23 +464,39 @@ fun AnalyticsScreen(
     /* ---------- Nutrition Today ---------- */
     val todayIso = todayKeyIso()
     val entries by nutritionViewModel.entries.collectAsState()
-    val todayNutrition = entries.filter { it.date == todayIso || it.date == SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()) }
-    val todayTotal = todayNutrition.fold(
-        NutritionEntry(
-            id = UUID.randomUUID(),
-            date = todayIso,
-            name = "",
-            calories = 0, protein = 0, carbs = 0, fats = 0, weight = 0
-        )
-    ) { acc, e ->
-        acc.copy(
-            calories = acc.calories + e.calories,
-            protein = acc.protein + e.protein,
-            carbs = acc.carbs + e.carbs,
-            fats = acc.fats + e.fats,
-            weight = acc.weight + e.weight
-        )
-    }
+
+// Если todayKeyIso уже даёт дату формата yyyy-MM-dd, второй фильтр можно убрать.
+// Оставляю только сравнение с todayIso, чтобы не было дублей.
+    val todayNutrition = entries.filter { it.date == todayIso }
+
+    val totalCalories = todayNutrition.sumOf { it.calories }
+    val totalProtein  = todayNutrition.sumOf { it.protein }
+    val totalCarbs    = todayNutrition.sumOf { it.carbs }
+    val totalFats     = todayNutrition.sumOf { it.fats }
+    val totalWeight   = todayNutrition.sumOf { it.weight }
+
+    val todayTotal =
+        if (todayNutrition.isEmpty()) {
+            NutritionEntry(
+                date = todayIso,
+                name = "",
+                calories = 0,
+                protein = 0,
+                carbs = 0,
+                fats = 0,
+                weight = 0
+            )
+        } else {
+            NutritionEntry(
+                date = todayIso,
+                name = "Итого",
+                calories = totalCalories,
+                protein = totalProtein,
+                carbs = totalCarbs,
+                fats = totalFats,
+                weight = totalWeight
+            )
+        }
 
     /* ---------- Weight history ---------- */
     fun loadWeightHistory(): List<Pair<String, Float>> {
