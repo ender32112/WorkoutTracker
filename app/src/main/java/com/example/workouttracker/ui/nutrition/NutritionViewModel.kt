@@ -77,6 +77,23 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         )
     }
 
+    fun getDailySummaries(): List<DailyNutritionSummary> {
+        val currentEntries = entries.value
+
+        return currentEntries
+            .groupBy { it.date }
+            .map { (date, list) ->
+                DailyNutritionSummary(
+                    date = date,
+                    calories = list.sumOf { it.calories },
+                    protein = list.sumOf { it.protein },
+                    fats = list.sumOf { it.fats },
+                    carbs = list.sumOf { it.carbs }
+                )
+            }
+            .sortedByDescending { it.date }
+    }
+
     private fun loadEntries() {
         val jsonString = prefs.getString("entries", null) ?: return
         try {
