@@ -549,8 +549,59 @@ class NutritionAiRepository private constructor(context: Context) {
                         ?: throw IllegalStateException("У блюда нет жиров"),
                     carbs = it.get("carbs")?.asInt
                         ?: throw IllegalStateException("У блюда нет углеводов")
-                )
-            }
+            )
+    }
+
+    suspend fun canonicalizeFoodName(rawName: String): String = withContext(Dispatchers.IO) {
+        if (rawName.isBlank()) return@withContext ""
+
+        val systemPrompt = """
+            Ты нутриционист. Тебе нужно привести произвольное название продукта к короткому каноническому виду.
+            Верни только одно короткое слово или фразу без кавычек, без пробелов по краям, без пояснений и Markdown.
+            Примеры:
+            "куриная грудка" -> "курица"
+            "спагетти" -> "макароны"
+            "греческий йогурт" -> "йогурт"
+        """.trimIndent()
+
+        val userPrompt = "Приведи продукт к каноническому виду: $rawName"
+
+        val requestBody = ChatCompletionRequest(
+            model = LlmConfig.MODEL_ID,
+            messages = listOf(
+                ChatMessage(role = "system", content = systemPrompt),
+                ChatMessage(role = "user", content = userPrompt)
+            ),
+            response_format = null,
+            temperature = 0.1
+        )
+
+        val jsonBody = gson.toJson(requestBody)
+        val body = jsonBody.toRequestBody(mediaTypeJson)
+        val url = LlmConfig.BASE_URL.trimEnd('/') + "/chat/completions"
+
+        val request = Request.Builder()
+            .url(url)
+            .post(body)
+            .build()
+
+        val response = client.newCall(request).execute()
+
+        if (!response.isSuccessful) {
+            val errorText = response.body?.string()
+            throw IllegalStateException("Ошибка LLM API: ${response.code} ${response.message} $errorText")
+        }
+
+        val responseText = response.body?.string()
+            ?: throw IllegalStateException("Пустой ответ от LLM API")
+
+        val chatResponse = gson.fromJson(responseText, ChatCompletionResponse::class.java)
+
+        val content = chatResponse.choices.firstOrNull()?.message?.content
+            ?: throw IllegalStateException("Пустой content в ответе модели")
+
+        content.trim()
+    }
 
             PlannedMeal(
                 type = type,

@@ -31,6 +31,7 @@ import kotlinx.coroutines.launch
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.workouttracker.viewmodel.NutritionViewModel
 import com.example.workouttracker.ui.components.SectionHeader
+import com.example.workouttracker.ui.nutrition_analytic.NutritionAnalyticsScreen
 import com.example.workouttracker.ui.nutrition.FridgeDialog
 import java.text.SimpleDateFormat
 import java.util.*
@@ -48,6 +49,8 @@ fun NutritionScreen(
     val profile by viewModel.profile.collectAsState()
     val planMessage by viewModel.planMessage.collectAsState()
     val fridgePrompt by viewModel.fridgeExtraPrompt.collectAsState()
+    val todayAnalytics by viewModel.todayAnalytics.collectAsState()
+    val weeklyAnalytics by viewModel.weeklyAnalytics.collectAsState()
 
     var showAddDialog by remember { mutableStateOf(false) }
     var editEntry by remember { mutableStateOf<NutritionEntry?>(null) }
@@ -208,6 +211,16 @@ fun NutritionScreen(
                         Text("Нет записей", style = MaterialTheme.typography.bodyLarge)
                     }
                 }
+            }
+
+            item {
+                SectionHeader("Аналитика питания")
+                NutritionAnalyticsScreen(
+                    todayAnalytics = todayAnalytics,
+                    weeklyAnalytics = weeklyAnalytics,
+                    onRefreshToday = { viewModel.computeTodayAnalytics() },
+                    onRefreshWeekly = { viewModel.computeWeeklyAnalytics() }
+                )
             }
         }
     }
