@@ -559,7 +559,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 )
                 oldMeal?.let { meal ->
                     meal.items.map { it.name }.forEach { name ->
-                        val canonical = canonicalizer.canonicalize(name)
+                        val canonical = foodCanonicalizer.canonicalize(name)
                         behaviorRepository.registerReplacedFood(canonical)
                     }
                 }
