@@ -10,6 +10,16 @@ class NutritionAnalyticsEngine(
     private val canonicalizer: FoodCanonicalizer
 ) {
 
+    data class WeeklyAnalyticsResult(
+        val weeklyAnalytics: WeeklyAnalytics?,
+        val foodStats: Map<String, FoodStats>
+    )
+
+    data class FoodStats(
+        var eaten: Int = 0,
+        var missed: Int = 0
+    )
+
     suspend fun computeDailyAnalytics(
         date: String,
         mealPlan: MealPlan?,
@@ -129,18 +139,21 @@ class NutritionAnalyticsEngine(
         dates: List<String>,
         mealPlansByDate: Map<String, MealPlan?>,
         entriesByDate: Map<String, List<NutritionEntry>>
-    ): WeeklyAnalytics? {
-        if (dates.isEmpty()) return WeeklyAnalytics(
-            startDate = "",
-            endDate = "",
-            days = emptyList(),
-            avgAdherenceCaloriesPercent = 0,
-            avgAdherenceProteinPercent = 0,
-            avgAdherenceFatsPercent = 0,
-            avgAdherenceCarbsPercent = 0,
-            favoriteFoods = emptyList(),
-            ignoredPlannedFoods = emptyList(),
-            replacedFoods = emptyList()
+    ): WeeklyAnalyticsResult {
+        if (dates.isEmpty()) return WeeklyAnalyticsResult(
+            weeklyAnalytics = WeeklyAnalytics(
+                startDate = "",
+                endDate = "",
+                days = emptyList(),
+                avgAdherenceCaloriesPercent = 0,
+                avgAdherenceProteinPercent = 0,
+                avgAdherenceFatsPercent = 0,
+                avgAdherenceCarbsPercent = 0,
+                favoriteFoods = emptyList(),
+                ignoredPlannedFoods = emptyList(),
+                replacedFoods = emptyList()
+            ),
+            foodStats = emptyMap()
         )
 
         val dailyAnalytics = dates.mapNotNull { date ->
@@ -149,61 +162,71 @@ class NutritionAnalyticsEngine(
             computeDailyAnalytics(date, plan, entries)
         }
 
-        if (dailyAnalytics.isEmpty()) return WeeklyAnalytics(
-            startDate = dates.minOrNull().orEmpty(),
-            endDate = dates.maxOrNull().orEmpty(),
-            days = emptyList(),
-            avgAdherenceCaloriesPercent = 0,
-            avgAdherenceProteinPercent = 0,
-            avgAdherenceFatsPercent = 0,
-            avgAdherenceCarbsPercent = 0,
-            favoriteFoods = emptyList(),
-            ignoredPlannedFoods = emptyList(),
-            replacedFoods = emptyList()
+        if (dailyAnalytics.isEmpty()) return WeeklyAnalyticsResult(
+            weeklyAnalytics = WeeklyAnalytics(
+                startDate = dates.minOrNull().orEmpty(),
+                endDate = dates.maxOrNull().orEmpty(),
+                days = emptyList(),
+                avgAdherenceCaloriesPercent = 0,
+                avgAdherenceProteinPercent = 0,
+                avgAdherenceFatsPercent = 0,
+                avgAdherenceCarbsPercent = 0,
+                favoriteFoods = emptyList(),
+                ignoredPlannedFoods = emptyList(),
+                replacedFoods = emptyList()
+            ),
+            foodStats = emptyMap()
         )
 
         fun avg(selector: (DailyAnalytics) -> Int): Int {
             return dailyAnalytics.map { selector(it) }.average().roundToInt()
         }
 
-        val favoriteFoodsMap = mutableMapOf<String, Int>()
-        val ignoredMap = mutableMapOf<String, Int>()
-        val extraMap = mutableMapOf<String, Int>()
+        val stats = mutableMapOf<String, FoodStats>()
 
         dailyAnalytics.forEach { day ->
             day.mealComparisons.forEach { comparison ->
                 comparison.eatenItems.forEach { item ->
-                    if (item.nameCanonical.isNotBlank()) {
-                        favoriteFoodsMap[item.nameCanonical] = favoriteFoodsMap.getOrDefault(item.nameCanonical, 0) + 1
+                    val key = item.nameCanonical
+                    if (key.isNotBlank()) {
+                        val current = stats.getOrPut(key) { FoodStats() }
+                        current.eaten += 1
                     }
                 }
                 comparison.missedFromPlan.forEach { item ->
-                    if (item.nameCanonical.isNotBlank()) {
-                        ignoredMap[item.nameCanonical] = ignoredMap.getOrDefault(item.nameCanonical, 0) + 1
-                    }
-                }
-                comparison.extraFood.forEach { item ->
-                    if (item.nameCanonical.isNotBlank()) {
-                        extraMap[item.nameCanonical] = extraMap.getOrDefault(item.nameCanonical, 0) + 1
+                    val key = item.nameCanonical
+                    if (key.isNotBlank()) {
+                        val current = stats.getOrPut(key) { FoodStats() }
+                        current.missed += 1
                     }
                 }
             }
         }
 
-        fun topKeys(map: Map<String, Int>, limit: Int = 10): List<String> =
-            map.entries.sortedByDescending { it.value }.take(limit).map { it.key }
+        val favoriteFoods = stats
+            .filter { (_, stat) -> stat.eaten >= 2 && stat.missed <= stat.eaten / 2 }
+            .entries
+            .sortedByDescending { it.value.eaten }
+            .take(10)
+            .map { it.key }
 
-        val favoriteFoods = topKeys(favoriteFoodsMap)
-        val ignoredPlannedFoods = topKeys(ignoredMap)
-        val replacedFoods = topKeys(
-            ignoredPlannedFoods.associateWith { key ->
-                (ignoredMap[key] ?: 0) + (extraMap[key] ?: 0)
-            }
-        )
+        val ignoredPlannedFoods = stats
+            .filter { (_, stat) -> stat.missed >= 2 && stat.eaten == 0 }
+            .entries
+            .sortedByDescending { it.value.missed }
+            .take(10)
+            .map { it.key }
+
+        val replacedFoods = stats
+            .filter { (_, stat) -> stat.missed >= 2 && stat.missed >= stat.eaten }
+            .entries
+            .sortedByDescending { it.value.missed }
+            .take(10)
+            .map { it.key }
 
         val sortedDates = dailyAnalytics.map { it.date }.sorted()
 
-        return WeeklyAnalytics(
+        val weekly = WeeklyAnalytics(
             startDate = sortedDates.first(),
             endDate = sortedDates.last(),
             days = dailyAnalytics,
@@ -214,6 +237,26 @@ class NutritionAnalyticsEngine(
             favoriteFoods = favoriteFoods,
             ignoredPlannedFoods = ignoredPlannedFoods,
             replacedFoods = replacedFoods
+        )
+
+        return WeeklyAnalyticsResult(
+            weeklyAnalytics = weekly,
+            foodStats = stats
+        )
+    }
+
+    fun buildFoodRatings(stats: Map<String, FoodStats>): List<FoodRating> {
+        return stats.map { (name, stat) ->
+            val total = maxOf(1, stat.eaten + stat.missed)
+            FoodRating(
+                nameCanonical = name,
+                eatenCount = stat.eaten,
+                missedCount = stat.missed,
+                adherenceRatio = stat.eaten.toDouble() / total
+            )
+        }.sortedWith(
+            compareByDescending<FoodRating> { it.adherenceRatio }
+                .thenByDescending { it.eatenCount + it.missedCount }
         )
     }
 }
