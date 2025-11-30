@@ -31,6 +31,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     private val userId = authPrefs.getString(AuthViewModel.KEY_CURRENT_USER_ID, null) ?: "guest"
     private val prefs = application.getSharedPreferences("nutrition_prefs_" + userId, Context.MODE_PRIVATE)
     private val profileRepository = ProfileRepository(application.applicationContext)
+    private val nutritionAiRepository = NutritionAiRepository.getInstance(application.applicationContext)
 
     private val _entries = MutableStateFlow<List<NutritionEntry>>(emptyList())
     val entries: StateFlow<List<NutritionEntry>> = _entries
@@ -71,6 +72,12 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         _profile.value = profileRepository.loadProfile()
         _recommendedNorm.value = _profile.value?.let { NutritionCalculator.calculateRecommendedNorm(it) }
         loadEntries()
+
+        val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        val cached = nutritionAiRepository.loadCachedPlan(today)
+        if (cached != null) {
+            _mealPlan.value = cached
+        }
     }
 
     fun getEntriesByDate(date: String): Map<MealType, List<NutritionEntry>> {
@@ -302,7 +309,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             _isPlanLoading.value = true
             _planError.value = null
             try {
-                val plan = NutritionAiRepository.instance.generatePersonalizedPlan(
+                val plan = nutritionAiRepository.generatePersonalizedPlan(
                     date = today,
                     profile = profile.value,
                     recommendedNorm = recommendedNorm.value,
@@ -310,6 +317,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                     history = history
                 )
                 _mealPlan.value = plan
+                nutritionAiRepository.saveCachedPlan(today, plan)
             } catch (e: Exception) {
                 e.printStackTrace()
                 _planError.value = e.message ?: "Ошибка при генерации плана"
