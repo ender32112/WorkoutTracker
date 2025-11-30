@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.QueryStats
@@ -30,11 +31,13 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -88,6 +91,10 @@ fun NutritionAnalyticsFullScreen(
                 onShowRatings = { showRatings = true },
                 ratingsAvailable = foodRatings.isNotEmpty()
             )
+            FoodRatingsCard(
+                ratings = foodRatings,
+                onShowAll = { showRatings = true }
+            )
             DailyAnalyticsCardPretty(analytics = todayAnalytics, onRefresh = onRefreshToday)
             WeeklyAnalyticsCardPretty(weekly = weeklyAnalytics)
         }
@@ -110,25 +117,122 @@ private fun AnalyticsRefreshRow(
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        AssistChip(
+        FilledTonalButton(
             onClick = onRefreshToday,
-            leadingIcon = { Icon(Icons.Filled.Refresh, contentDescription = null) },
-            label = { Text("Пересчитать день") },
-            colors = AssistChipDefaults.assistChipColors()
-        )
-        AssistChip(
+            modifier = Modifier.weight(1f),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Icon(Icons.Filled.Refresh, contentDescription = null)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Пересчитать день")
+        }
+        FilledTonalButton(
             onClick = onRefreshWeekly,
-            leadingIcon = { Icon(Icons.Filled.Refresh, contentDescription = null) },
-            label = { Text("Пересчитать неделю") },
-            colors = AssistChipDefaults.assistChipColors()
-        )
-        AssistChip(
+            modifier = Modifier.weight(1f),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Icon(Icons.Filled.Refresh, contentDescription = null)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Пересчитать неделю")
+        }
+        ElevatedButton(
             onClick = onShowRatings,
+            modifier = Modifier.weight(1f),
+            shape = RoundedCornerShape(12.dp),
             enabled = ratingsAvailable,
-            leadingIcon = { Icon(Icons.Filled.QueryStats, contentDescription = null) },
-            label = { Text("Рейтинг продуктов") }
+            colors = ButtonDefaults.elevatedButtonColors()
+        ) {
+            Icon(Icons.Filled.QueryStats, contentDescription = null)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Рейтинг продуктов")
+        }
+    }
+}
+
+@Composable
+private fun FoodRatingsCard(
+    ratings: List<FoodRating>,
+    onShowAll: () -> Unit
+) {
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "Рейтинг блюд",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                    Text(
+                        text = if (ratings.isEmpty()) "Недостаточно данных для рейтинга" else "Топ блюд по выполнению плана",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                TextButton(onClick = onShowAll, enabled = ratings.isNotEmpty()) {
+                    Text("Показать все")
+                }
+            }
+
+            if (ratings.isNotEmpty()) {
+                ratings
+                    .sortedByDescending { it.adherenceRatio }
+                    .take(3)
+                    .forEach { rating ->
+                        FoodRatingPreviewRow(rating)
+                    }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FoodRatingPreviewRow(rating: FoodRating) {
+    val adherencePercent = (rating.adherenceRatio * 100).toInt().coerceIn(0, 200)
+    val color = when {
+        rating.adherenceRatio >= 0.7 -> MaterialTheme.colorScheme.primary
+        rating.adherenceRatio >= 0.4 -> MaterialTheme.colorScheme.tertiary
+        else -> MaterialTheme.colorScheme.error
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = rating.nameCanonical,
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+            )
+            Text(
+                text = "$adherencePercent%",
+                style = MaterialTheme.typography.bodyMedium,
+                color = color
+            )
+        }
+        LinearProgressIndicator(
+            progress = (adherencePercent / 100f).coerceIn(0f, 1f),
+            modifier = Modifier.fillMaxWidth(),
+            color = color,
+            trackColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+        Text(
+            text = "Съедено ${rating.eatenCount} · Пропущено ${rating.missedCount}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
