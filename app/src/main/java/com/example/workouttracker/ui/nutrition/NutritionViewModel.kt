@@ -15,6 +15,8 @@ import com.example.workouttracker.ui.nutrition.NutritionProfile
 import com.example.workouttracker.ui.nutrition.Norm
 import com.example.workouttracker.ui.nutrition.ProfileRepository
 import com.example.workouttracker.llm.NutritionAiRepository
+import com.example.workouttracker.ui.nutrition.BehaviorPreferencesRepository
+import com.example.workouttracker.ui.nutrition.FridgeProduct
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -25,6 +27,7 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import kotlin.math.roundToInt
 
 class NutritionViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -33,6 +36,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     private val prefs = application.getSharedPreferences("nutrition_prefs_" + userId, Context.MODE_PRIVATE)
     private val profileRepository = ProfileRepository(application.applicationContext)
     private val nutritionAiRepository = NutritionAiRepository.getInstance(application.applicationContext)
+    private val behaviorRepository = BehaviorPreferencesRepository(application.applicationContext)
 
     private val _entries = MutableStateFlow<List<NutritionEntry>>(emptyList())
     val entries: StateFlow<List<NutritionEntry>> = _entries
@@ -56,6 +60,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     private val _recommendedNorm = MutableStateFlow<Norm?>(null)
     val recommendedNorm: StateFlow<Norm?> = _recommendedNorm
 
+    private val _fridgeExtraPrompt = MutableStateFlow<FridgeExtraPrompt?>(null)
+    val fridgeExtraPrompt: StateFlow<FridgeExtraPrompt?> = _fridgeExtraPrompt
+
     var dailyNorm = mapOf<String, Int>()
 
     data class DailyNutritionSummary(
@@ -64,6 +71,17 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         val protein: Int,
         val fats: Int,
         val carbs: Int
+    )
+
+    data class AdjustedGoal(
+        val calories: Int,
+        val protein: Int,
+        val fats: Int,
+        val carbs: Int
+    )
+
+    data class FridgeExtraPrompt(
+        val fridge: List<FridgeProduct>
     )
 
     init {
@@ -116,6 +134,56 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 )
             }
             .sortedByDescending { it.date }
+    }
+
+    private fun calculateAdjustedGoal(
+        profile: NutritionProfile?,
+        recommendedNorm: Norm?,
+        userNorm: Map<String, Int>?,
+        history: List<DailyNutritionSummary>
+    ): AdjustedGoal {
+        val defaultNorm = mapOf(
+            "calories" to 2000,
+            "protein" to 120,
+            "fats" to 70,
+            "carbs" to 250
+        )
+
+        val targetCaloriesBase = userNorm?.get("calories")
+            ?: recommendedNorm?.calories
+            ?: defaultNorm.getValue("calories")
+
+        val targetProteinBase = userNorm?.get("protein")
+            ?: recommendedNorm?.protein
+            ?: defaultNorm.getValue("protein")
+
+        val targetFatsBase = userNorm?.get("fats")
+            ?: recommendedNorm?.fats
+            ?: defaultNorm.getValue("fats")
+
+        val targetCarbsBase = userNorm?.get("carbs")
+            ?: recommendedNorm?.carbs
+            ?: defaultNorm.getValue("carbs")
+
+        val historyWindow = history.take(7)
+        val avgCalories = historyWindow.takeIf { it.isNotEmpty() }?.map { it.calories }?.average()
+        val calorieDiff = avgCalories?.minus(targetCaloriesBase)
+        val calorieAdjustment = calorieDiff?.let { (-it).coerceIn(-400.0, 400.0) } ?: 0.0
+        val adjustedCaloriesDouble = (targetCaloriesBase + calorieAdjustment).coerceAtLeast(1500.0)
+        val adjustedCalories = adjustedCaloriesDouble.roundToInt()
+
+        val scale = adjustedCaloriesDouble / targetCaloriesBase.toDouble()
+
+        val adjustedProtein = (targetProteinBase * scale).roundToInt().coerceAtLeast(0)
+        val adjustedFats = (targetFatsBase * scale).roundToInt().coerceAtLeast(0)
+        val adjustedCarbs = (targetCarbsBase * scale).roundToInt().coerceAtLeast(0)
+
+        return AdjustedGoal(
+            calories = adjustedCalories,
+            protein = adjustedProtein,
+            fats = adjustedFats,
+            carbs = adjustedCarbs
+        )
     }
 
     private fun loadEntries() {
@@ -305,9 +373,82 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
 
     // ---- ГЕНЕРАЦИЯ ПЛАНА С LLM ----
 
+    fun generatePlanFromFridge(fridge: List<FridgeProduct>, allowExtraProducts: Boolean) {
+        _fridgeExtraPrompt.value = null
+        generatePlanFromFridgeInternal(fridge, allowExtraProducts, forceProceed = false)
+    }
+
+    private fun generatePlanFromFridgeInternal(
+        fridge: List<FridgeProduct>,
+        allowExtraProducts: Boolean,
+        forceProceed: Boolean
+    ) {
+        val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        if (hasCachedPlanForDate(today)) {
+            _planError.value = "План на сегодня уже создан"
+            return
+        }
+
+        val history = getDailySummaries().take(7)
+        val dislikedByBehavior = getDislikedByBehavior()
+        val adjustedGoal = calculateAdjustedGoal(profile.value, recommendedNorm.value, dailyNorm, history)
+
+        viewModelScope.launch {
+            _isPlanLoading.value = true
+            _planError.value = null
+            try {
+                if (!allowExtraProducts && !forceProceed) {
+                    val maxCaloriesFromFridge = fridge.sumOf { product ->
+                        val available = product.availableGrams ?: 0
+                        available * product.calories100 / 100
+                    }
+                    if (maxCaloriesFromFridge < (adjustedGoal.calories * 0.9).roundToInt()) {
+                        _fridgeExtraPrompt.value = FridgeExtraPrompt(fridge)
+                        return@launch
+                    }
+                }
+
+                val plan = nutritionAiRepository.generatePlanFromFridge(
+                    date = today,
+                    fridge = fridge,
+                    profile = profile.value,
+                    recommendedNorm = recommendedNorm.value,
+                    userNorm = dailyNorm,
+                    history = history,
+                    dislikedByBehavior = dislikedByBehavior,
+                    allowExtraProducts = allowExtraProducts,
+                    goalCalories = adjustedGoal.calories,
+                    goalProtein = adjustedGoal.protein,
+                    goalFats = adjustedGoal.fats,
+                    goalCarbs = adjustedGoal.carbs
+                )
+                _mealPlan.value = plan
+                nutritionAiRepository.saveCachedPlan(today, plan)
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _planError.value = e.message ?: "Ошибка при генерации плана"
+            } finally {
+                _isPlanLoading.value = false
+            }
+        }
+    }
+
+    fun allowExtraProductsForFridgePlan() {
+        val fridge = _fridgeExtraPrompt.value?.fridge ?: return
+        _fridgeExtraPrompt.value = null
+        generatePlanFromFridgeInternal(fridge, allowExtraProducts = true, forceProceed = true)
+    }
+
+    fun continueWithoutExtraProducts() {
+        val fridge = _fridgeExtraPrompt.value?.fridge ?: return
+        _fridgeExtraPrompt.value = null
+        generatePlanFromFridgeInternal(fridge, allowExtraProducts = false, forceProceed = true)
+    }
+
     fun generateTodayPlan() {
         val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
         val history = getDailySummaries().take(7)
+        val dislikedByBehavior = getDislikedByBehavior()
 
         viewModelScope.launch {
             _isPlanLoading.value = true
@@ -318,7 +459,8 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                     profile = profile.value,
                     recommendedNorm = recommendedNorm.value,
                     userNorm = dailyNorm,
-                    history = history
+                    history = history,
+                    dislikedByBehavior = dislikedByBehavior
                 )
                 _mealPlan.value = plan
                 nutritionAiRepository.saveCachedPlan(today, plan)
@@ -338,6 +480,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             return
         }
 
+        val oldMeal = currentPlan.meals.firstOrNull { it.type == mealType }
+        val dislikedByBehavior = getDislikedByBehavior()
+
         viewModelScope.launch {
             _isPlanLoading.value = true
             _planError.value = null
@@ -349,8 +494,13 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                     profile = profile.value,
                     recommendedNorm = recommendedNorm.value,
                     userNorm = dailyNorm,
+                    dislikedByBehavior = dislikedByBehavior,
                     comment = comment
                 )
+                oldMeal?.let { meal ->
+                    val oldDishNames = meal.items.map { it.name }
+                    behaviorRepository.incrementDislike(oldDishNames)
+                }
                 val updatedMeals = currentPlan.meals.map { existing ->
                     if (existing.type == mealType) newMeal else existing
                 }
@@ -399,11 +549,19 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         return nutritionAiRepository.loadCachedPlan(date) != null
     }
 
+    fun setPlanError(message: String) {
+        _planError.value = message
+    }
+
     fun consumePlanMessage() {
         _planMessage.value = null
     }
 
     fun clearPlanError() {
         _planError.value = null
+    }
+
+    private fun getDislikedByBehavior(): Set<String> {
+        return behaviorRepository.getDislikedByBehavior()
     }
 }

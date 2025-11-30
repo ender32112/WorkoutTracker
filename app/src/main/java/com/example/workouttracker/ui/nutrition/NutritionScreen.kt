@@ -31,6 +31,7 @@ import kotlinx.coroutines.launch
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.workouttracker.viewmodel.NutritionViewModel
 import com.example.workouttracker.ui.components.SectionHeader
+import com.example.workouttracker.ui.nutrition.FridgeDialog
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -46,6 +47,7 @@ fun NutritionScreen(
     val recommendedNorm by viewModel.recommendedNorm.collectAsState()
     val profile by viewModel.profile.collectAsState()
     val planMessage by viewModel.planMessage.collectAsState()
+    val fridgePrompt by viewModel.fridgeExtraPrompt.collectAsState()
 
     var showAddDialog by remember { mutableStateOf(false) }
     var editEntry by remember { mutableStateOf<NutritionEntry?>(null) }
@@ -54,6 +56,8 @@ fun NutritionScreen(
     var showReplaceDialog by remember { mutableStateOf(false) }
     var replaceMealType by remember { mutableStateOf<MealType?>(null) }
     var replaceComment by remember { mutableStateOf("") }
+    var showFridgeChoiceDialog by remember { mutableStateOf(false) }
+    var showFridgeDialog by remember { mutableStateOf(false) }
 
     val snackbarHost = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()                // ← добавили
@@ -132,7 +136,14 @@ fun NutritionScreen(
                     mealPlan = mealPlan,
                     isLoading = isPlanLoading,
                     error = planError,
-                    onGenerateClick = { viewModel.generateTodayPlan() },
+                    onGenerateClick = {
+                        val planExists = viewModel.hasCachedPlanForDate(today)
+                        if (planExists) {
+                            viewModel.setPlanError("План на сегодня уже создан")
+                        } else {
+                            showFridgeChoiceDialog = true
+                        }
+                    },
                     onDismissError = { viewModel.clearPlanError() },
                     onReplaceMeal = { type ->
                         replaceMealType = type
@@ -199,6 +210,56 @@ fun NutritionScreen(
                 }
             }
         }
+    }
+
+    if (showFridgeChoiceDialog) {
+        AlertDialog(
+            onDismissRequest = { showFridgeChoiceDialog = false },
+            title = { Text("Сформировать план") },
+            text = { Text("Хотите использовать продукты из холодильника?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showFridgeChoiceDialog = false
+                    showFridgeDialog = true
+                }) {
+                    Text("Да")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showFridgeChoiceDialog = false
+                    viewModel.generateTodayPlan()
+                }) {
+                    Text("Нет")
+                }
+            }
+        )
+    }
+
+    if (showFridgeDialog) {
+        FridgeDialog(
+            onConfirm = { fridge, allowExtra ->
+                showFridgeDialog = false
+                viewModel.generatePlanFromFridge(fridge, allowExtra)
+            },
+            onDismiss = { showFridgeDialog = false }
+        )
+    }
+
+    fridgePrompt?.let {
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("Недостаточно продуктов") },
+            text = {
+                Text("Эти продукты не покрывают вашу дневную норму. Разрешить использование дополнительных продуктов?")
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.allowExtraProductsForFridgePlan() }) { Text("Да") }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.continueWithoutExtraProducts() }) { Text("Нет") }
+            }
+        )
     }
 
     if (showAddDialog) {
