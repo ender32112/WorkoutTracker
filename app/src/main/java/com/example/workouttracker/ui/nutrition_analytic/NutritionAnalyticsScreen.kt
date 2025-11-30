@@ -14,6 +14,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.QueryStats
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
@@ -30,6 +31,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -37,6 +42,8 @@ import com.example.workouttracker.ui.analytics.NutritionTodayCardPretty
 import com.example.workouttracker.ui.components.SectionHeader
 import com.example.workouttracker.ui.nutrition.MealType
 import com.example.workouttracker.ui.nutrition.NutritionEntry
+import com.example.workouttracker.ui.nutrition_analytic.FoodRating
+
 
 @Composable
 fun NutritionAnalyticsFullScreen(
@@ -44,10 +51,13 @@ fun NutritionAnalyticsFullScreen(
     norm: Map<String, Int>,
     todayAnalytics: DailyAnalytics?,
     weeklyAnalytics: WeeklyAnalytics?,
+    foodRatings: List<FoodRating>,
     onRefreshToday: () -> Unit,
     onRefreshWeekly: () -> Unit,
     onClose: () -> Unit
 ) {
+    var showRatings by remember { mutableStateOf(false) }
+
     Scaffold(
         topBar = {
             SectionHeader(
@@ -72,17 +82,31 @@ fun NutritionAnalyticsFullScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             NutritionTodayCardPretty(total = todayTotal, norm = norm)
-            AnalyticsRefreshRow(onRefreshToday = onRefreshToday, onRefreshWeekly = onRefreshWeekly)
+            AnalyticsRefreshRow(
+                onRefreshToday = onRefreshToday,
+                onRefreshWeekly = onRefreshWeekly,
+                onShowRatings = { showRatings = true },
+                ratingsAvailable = foodRatings.isNotEmpty()
+            )
             DailyAnalyticsCardPretty(analytics = todayAnalytics, onRefresh = onRefreshToday)
             WeeklyAnalyticsCardPretty(weekly = weeklyAnalytics)
         }
+    }
+
+    if (showRatings) {
+        FoodRatingsDialog(
+            ratings = foodRatings,
+            onDismiss = { showRatings = false }
+        )
     }
 }
 
 @Composable
 private fun AnalyticsRefreshRow(
     onRefreshToday: () -> Unit,
-    onRefreshWeekly: () -> Unit
+    onRefreshWeekly: () -> Unit,
+    onShowRatings: () -> Unit,
+    ratingsAvailable: Boolean
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -99,6 +123,12 @@ private fun AnalyticsRefreshRow(
             leadingIcon = { Icon(Icons.Filled.Refresh, contentDescription = null) },
             label = { Text("Пересчитать неделю") },
             colors = AssistChipDefaults.assistChipColors()
+        )
+        AssistChip(
+            onClick = onShowRatings,
+            enabled = ratingsAvailable,
+            leadingIcon = { Icon(Icons.Filled.QueryStats, contentDescription = null) },
+            label = { Text("Рейтинг продуктов") }
         )
     }
 }
@@ -316,9 +346,12 @@ private fun AnalyticsTagBlock(title: String, items: List<String>) {
 fun NutritionAnalyticsScreen(
     todayAnalytics: DailyAnalytics?,
     weeklyAnalytics: WeeklyAnalytics?,
+    foodRatings: List<FoodRating>,
     onRefreshToday: () -> Unit,
     onRefreshWeekly: () -> Unit
 ) {
+    var showRatings by remember { mutableStateOf(false) }
+
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -341,6 +374,16 @@ fun NutritionAnalyticsScreen(
                 Icon(imageVector = Icons.Filled.Refresh, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("Обновить неделю")
+            }
+            ElevatedButton(
+                onClick = { showRatings = true },
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(12.dp),
+                enabled = foodRatings.isNotEmpty()
+            ) {
+                Icon(imageVector = Icons.Filled.QueryStats, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Рейтинг продуктов")
             }
         }
 
@@ -411,6 +454,13 @@ fun NutritionAnalyticsScreen(
             }
         }
     }
+
+    if (showRatings) {
+        FoodRatingsDialog(
+            ratings = foodRatings,
+            onDismiss = { showRatings = false }
+        )
+    }
 }
 
 @Composable
@@ -454,6 +504,36 @@ private fun MealComparisonItem(comparison: MealComparison) {
             text = "Совпало: ${comparison.matched.size}, пропущено: ${comparison.missedFromPlan.size}, добавлено: ${comparison.extraFood.size}",
             style = MaterialTheme.typography.bodySmall
         )
+
+        if (comparison.missedFromPlan.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Не съедено из плана:",
+                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold)
+            )
+            comparison.missedFromPlan.forEach { item ->
+                Text(
+                    text = "• ${item.nameOriginal} — ${item.calories} ккал (Б:${item.protein} Ж:${item.fats} У:${item.carbs})",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        if (comparison.extraFood.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Дополнительно съедено:",
+                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold)
+            )
+            comparison.extraFood.forEach { item ->
+                Text(
+                    text = "• ${item.nameOriginal} — ${item.calories} ккал (Б:${item.protein} Ж:${item.fats} У:${item.carbs})",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
     }
 }
 

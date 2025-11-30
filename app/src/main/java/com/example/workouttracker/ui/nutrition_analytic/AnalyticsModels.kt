@@ -58,3 +58,10 @@ data class WeeklyAnalytics(
     val ignoredPlannedFoods: List<String>,
     val replacedFoods: List<String>
 )
+
+data class FoodRating(
+    val nameCanonical: String,
+    val eatenCount: Int,
+    val missedCount: Int,
+    val adherenceRatio: Double
+)

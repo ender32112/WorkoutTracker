@@ -55,6 +55,7 @@ fun NutritionScreen(
     val fridgePrompt by viewModel.fridgeExtraPrompt.collectAsState()
     val todayAnalytics by viewModel.todayAnalytics.collectAsState()
     val weeklyAnalytics by viewModel.weeklyAnalytics.collectAsState()
+    val foodRatings by viewModel.foodRatings.collectAsState()
 
     var showAddDialog by remember { mutableStateOf(false) }
     var editEntry by remember { mutableStateOf<NutritionEntry?>(null) }
@@ -236,16 +237,17 @@ fun NutritionScreen(
             properties = DialogProperties(usePlatformDefaultWidth = false)
         ) {
             BackHandler { showAnalyticsScreen = false }
-            NutritionAnalyticsFullScreen(
-                todayTotal = todayTotal,
-                norm = viewModel.dailyNorm,
-                todayAnalytics = todayAnalytics,
-                weeklyAnalytics = weeklyAnalytics,
-                onRefreshToday = { viewModel.computeTodayAnalytics() },
-                onRefreshWeekly = { viewModel.computeWeeklyAnalytics() },
-                onClose = { showAnalyticsScreen = false }
-            )
-        }
+                NutritionAnalyticsFullScreen(
+                    todayTotal = todayTotal,
+                    norm = viewModel.dailyNorm,
+                    todayAnalytics = todayAnalytics,
+                    weeklyAnalytics = weeklyAnalytics,
+                    foodRatings = foodRatings,
+                    onRefreshToday = { viewModel.computeTodayAnalytics() },
+                    onRefreshWeekly = { viewModel.computeWeeklyAnalytics() },
+                    onClose = { showAnalyticsScreen = false }
+                )
+            }
     }
 
     if (showFridgeChoiceDialog) {

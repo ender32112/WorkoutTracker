@@ -18,6 +18,7 @@ import com.example.workouttracker.llm.NutritionAiRepository
 import com.example.workouttracker.ui.nutrition.BehaviorPreferencesRepository
 import com.example.workouttracker.ui.nutrition.FridgeProduct
 import com.example.workouttracker.ui.nutrition_analytic.DailyAnalytics
+import com.example.workouttracker.ui.nutrition_analytic.FoodRating
 import com.example.workouttracker.ui.nutrition_analytic.FoodCanonicalizer
 import com.example.workouttracker.ui.nutrition_analytic.NutritionAnalyticsEngine
 import com.example.workouttracker.ui.nutrition_analytic.WeeklyAnalytics
@@ -74,6 +75,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val _weeklyAnalytics = MutableStateFlow<WeeklyAnalytics?>(null)
     val weeklyAnalytics: StateFlow<WeeklyAnalytics?> = _weeklyAnalytics
+
+    private val _foodRatings = MutableStateFlow<List<FoodRating>>(emptyList())
+    val foodRatings: StateFlow<List<FoodRating>> = _foodRatings
 
     var dailyNorm = mapOf<String, Int>()
 
@@ -172,7 +176,23 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         }
 
         viewModelScope.launch {
-            _weeklyAnalytics.value = analyticsEngine.computeWeeklyAnalytics(recentDates, mealPlans, entriesByDate)
+            val result = analyticsEngine.computeWeeklyAnalytics(recentDates, mealPlans, entriesByDate)
+            _weeklyAnalytics.value = result.weeklyAnalytics
+            _foodRatings.value = analyticsEngine.buildFoodRatings(result.foodStats)
+
+            result.weeklyAnalytics?.days.orEmpty().forEach { day ->
+                day.mealComparisons.forEach { comparison ->
+                    comparison.plannedItems.forEach { item ->
+                        behaviorRepository.registerPlannedFood(item.nameCanonical)
+                    }
+                    comparison.matched.forEach { matched ->
+                        behaviorRepository.registerEatenFood(matched.planned.nameCanonical)
+                    }
+                    comparison.missedFromPlan.forEach { item ->
+                        behaviorRepository.registerSkippedFood(item.nameCanonical)
+                    }
+                }
+            }
         }
     }
 
@@ -538,8 +558,10 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                     comment = comment
                 )
                 oldMeal?.let { meal ->
-                    val oldDishNames = meal.items.map { it.name }
-                    behaviorRepository.incrementDislike(oldDishNames)
+                    meal.items.map { it.name }.forEach { name ->
+                        val canonical = canonicalizer.canonicalize(name)
+                        behaviorRepository.registerReplacedFood(canonical)
+                    }
                 }
                 val updatedMeals = currentPlan.meals.map { existing ->
                     if (existing.type == mealType) newMeal else existing
