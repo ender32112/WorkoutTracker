@@ -1,5 +1,6 @@
 package com.example.workouttracker.llm
 
+import android.content.Context
 import com.example.workouttracker.ui.nutrition.MealPlan
 import com.example.workouttracker.ui.nutrition.MealType
 import com.example.workouttracker.ui.nutrition.NutritionProfile
@@ -55,9 +56,10 @@ data class ChatMessageContent(
  * Репозиторий, который общается с LLM через HTTP и
  * возвращает MealPlan для ViewModel.
  */
-class NutritionAiRepository private constructor() {
+class NutritionAiRepository private constructor(context: Context) {
 
     private val gson = Gson()
+    private val prefs = context.applicationContext.getSharedPreferences("nutrition_cache", Context.MODE_PRIVATE)
 
     // ---------- OkHttp клиент ----------
 
@@ -83,6 +85,18 @@ class NutritionAiRepository private constructor() {
 
 
     private val mediaTypeJson = "application/json; charset=utf-8".toMediaType()
+
+    fun loadCachedPlan(date: String): MealPlan? {
+        val key = "meal_plan_" + date
+        val json = prefs.getString(key, null) ?: return null
+        return gson.fromJson(json, MealPlan::class.java)
+    }
+
+    fun saveCachedPlan(date: String, plan: MealPlan) {
+        val key = "meal_plan_" + date
+        val json = gson.toJson(plan)
+        prefs.edit().putString(key, json).apply()
+    }
 
     // ---------- Публичный метод ----------
 
@@ -327,6 +341,13 @@ class NutritionAiRepository private constructor() {
     }
 
     companion object {
-        val instance: NutritionAiRepository by lazy { NutritionAiRepository() }
+        @Volatile
+        private var instance: NutritionAiRepository? = null
+
+        fun getInstance(context: Context): NutritionAiRepository {
+            return instance ?: synchronized(this) {
+                instance ?: NutritionAiRepository(context.applicationContext).also { instance = it }
+            }
+        }
     }
 }
