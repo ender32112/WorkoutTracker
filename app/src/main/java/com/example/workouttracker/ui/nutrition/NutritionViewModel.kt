@@ -17,6 +17,10 @@ import com.example.workouttracker.ui.nutrition.ProfileRepository
 import com.example.workouttracker.llm.NutritionAiRepository
 import com.example.workouttracker.ui.nutrition.BehaviorPreferencesRepository
 import com.example.workouttracker.ui.nutrition.FridgeProduct
+import com.example.workouttracker.ui.nutrition_analytic.DailyAnalytics
+import com.example.workouttracker.ui.nutrition_analytic.FoodCanonicalizer
+import com.example.workouttracker.ui.nutrition_analytic.NutritionAnalyticsEngine
+import com.example.workouttracker.ui.nutrition_analytic.WeeklyAnalytics
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -37,6 +41,8 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     private val profileRepository = ProfileRepository(application.applicationContext)
     private val nutritionAiRepository = NutritionAiRepository.getInstance(application.applicationContext)
     private val behaviorRepository = BehaviorPreferencesRepository(application.applicationContext)
+    private val foodCanonicalizer = FoodCanonicalizer(application.applicationContext, nutritionAiRepository)
+    private val analyticsEngine = NutritionAnalyticsEngine(foodCanonicalizer)
 
     private val _entries = MutableStateFlow<List<NutritionEntry>>(emptyList())
     val entries: StateFlow<List<NutritionEntry>> = _entries
@@ -62,6 +68,12 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val _fridgeExtraPrompt = MutableStateFlow<FridgeExtraPrompt?>(null)
     val fridgeExtraPrompt: StateFlow<FridgeExtraPrompt?> = _fridgeExtraPrompt
+
+    private val _todayAnalytics = MutableStateFlow<DailyAnalytics?>(null)
+    val todayAnalytics: StateFlow<DailyAnalytics?> = _todayAnalytics
+
+    private val _weeklyAnalytics = MutableStateFlow<WeeklyAnalytics?>(null)
+    val weeklyAnalytics: StateFlow<WeeklyAnalytics?> = _weeklyAnalytics
 
     var dailyNorm = mapOf<String, Int>()
 
@@ -134,6 +146,34 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 )
             }
             .sortedByDescending { it.date }
+    }
+
+    fun computeTodayAnalytics() {
+        val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        val plan = _mealPlan.value
+        val entriesToday = entries.value.filter { it.date == today }
+        viewModelScope.launch {
+            _todayAnalytics.value = analyticsEngine.computeDailyAnalytics(today, plan, entriesToday)
+        }
+    }
+
+    fun computeWeeklyAnalytics() {
+        val recentDates = getDailySummaries()
+            .sortedByDescending { it.date }
+            .take(7)
+            .map { it.date }
+
+        val mealPlans = recentDates.associateWith { date ->
+            nutritionAiRepository.loadCachedPlan(date)
+        }
+
+        val entriesByDate = recentDates.associateWith { date ->
+            entries.value.filter { it.date == date }
+        }
+
+        viewModelScope.launch {
+            _weeklyAnalytics.value = analyticsEngine.computeWeeklyAnalytics(recentDates, mealPlans, entriesByDate)
+        }
     }
 
     private fun calculateAdjustedGoal(
