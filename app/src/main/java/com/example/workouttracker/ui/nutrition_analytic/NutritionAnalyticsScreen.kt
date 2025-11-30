@@ -115,32 +115,37 @@ private fun AnalyticsRefreshRow(
     onShowRatings: () -> Unit,
     ratingsAvailable: Boolean
 ) {
-    Row(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        FilledTonalButton(
-            onClick = onRefreshToday,
-            modifier = Modifier.weight(1f),
-            shape = RoundedCornerShape(12.dp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(Icons.Filled.Refresh, contentDescription = null)
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Пересчитать день")
-        }
-        FilledTonalButton(
-            onClick = onRefreshWeekly,
-            modifier = Modifier.weight(1f),
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            Icon(Icons.Filled.Refresh, contentDescription = null)
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Пересчитать неделю")
+            FilledTonalButton(
+                onClick = onRefreshToday,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(Icons.Filled.Refresh, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Пересчитать день")
+            }
+            FilledTonalButton(
+                onClick = onRefreshWeekly,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(Icons.Filled.Refresh, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Пересчитать неделю")
+            }
         }
         ElevatedButton(
             onClick = onShowRatings,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(12.dp),
             enabled = ratingsAvailable,
             colors = ButtonDefaults.elevatedButtonColors()
@@ -419,8 +424,10 @@ private fun MealComparisonPrettyList(comparisons: List<MealComparison>) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 val bullets = buildList {
-                    if (comparison.extraFood.isNotEmpty()) add("Дополнительно: ${comparison.extraFood.joinToString()}")
-                    if (comparison.missedFromPlan.isNotEmpty()) add("Не съедено из плана: ${comparison.missedFromPlan.joinToString()}")
+                    val extraFood = comparison.extraFood.map { it.displayTitle() }
+                    if (extraFood.isNotEmpty()) add("Дополнительно: ${extraFood.joinToString()}")
+                    val missedFood = comparison.missedFromPlan.map { it.displayTitle() }
+                    if (missedFood.isNotEmpty()) add("Не съедено из плана: ${missedFood.joinToString()}")
                 }
                 bullets.forEach { line ->
                     Text(
@@ -457,31 +464,33 @@ fun NutritionAnalyticsScreen(
     var showRatings by remember { mutableStateOf(false) }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            ElevatedButton(
-                onClick = onRefreshToday,
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(12.dp)
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Icon(imageVector = Icons.Filled.Refresh, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Обновить день")
-            }
-            ElevatedButton(
-                onClick = onRefreshWeekly,
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Icon(imageVector = Icons.Filled.Refresh, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Обновить неделю")
+                ElevatedButton(
+                    onClick = onRefreshToday,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(imageVector = Icons.Filled.Refresh, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Обновить день")
+                }
+                ElevatedButton(
+                    onClick = onRefreshWeekly,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(imageVector = Icons.Filled.Refresh, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Обновить неделю")
+                }
             }
             ElevatedButton(
                 onClick = { showRatings = true },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
                 enabled = foodRatings.isNotEmpty()
             ) {
@@ -617,7 +626,7 @@ private fun MealComparisonItem(comparison: MealComparison) {
             )
             comparison.missedFromPlan.forEach { item ->
                 Text(
-                    text = "• ${item.nameOriginal} — ${item.calories} ккал (Б:${item.protein} Ж:${item.fats} У:${item.carbs})",
+                    text = "• ${item.displayTitle()} — ${item.calories} ккал (Б:${item.protein} Ж:${item.fats} У:${item.carbs})",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -632,7 +641,7 @@ private fun MealComparisonItem(comparison: MealComparison) {
             )
             comparison.extraFood.forEach { item ->
                 Text(
-                    text = "• ${item.nameOriginal} — ${item.calories} ккал (Б:${item.protein} Ж:${item.fats} У:${item.carbs})",
+                    text = "• ${item.displayTitle()} — ${item.calories} ккал (Б:${item.protein} Ж:${item.fats} У:${item.carbs})",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -640,6 +649,8 @@ private fun MealComparisonItem(comparison: MealComparison) {
         }
     }
 }
+
+private fun CanonicalFoodItem.displayTitle(): String = nameOriginal.ifBlank { nameCanonical }
 
 private fun MealType.displayName(): String = when (this) {
     MealType.BREAKFAST -> "Завтрак"
