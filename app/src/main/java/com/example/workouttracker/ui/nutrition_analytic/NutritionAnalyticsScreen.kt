@@ -7,12 +7,15 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Button
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Divider
+import androidx.compose.material3.ElevatedButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -29,9 +32,28 @@ fun NutritionAnalyticsScreen(
     onRefreshWeekly: () -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onRefreshToday) { Text("Обновить день") }
-            Button(onClick = onRefreshWeekly) { Text("Обновить неделю") }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            ElevatedButton(
+                onClick = onRefreshToday,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(imageVector = Icons.Filled.Refresh, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Обновить день")
+            }
+            ElevatedButton(
+                onClick = onRefreshWeekly,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(imageVector = Icons.Filled.Refresh, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Обновить неделю")
+            }
         }
 
         if (todayAnalytics == null && weeklyAnalytics == null) {
@@ -120,9 +142,15 @@ private fun MacroRow(label: String, planned: Int, fact: Int, adherence: Int) {
 
 @Composable
 private fun MealComparisonsList(comparisons: List<MealComparison>) {
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
-        items(comparisons) { comparison ->
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        comparisons.forEachIndexed { index, comparison ->
             MealComparisonItem(comparison)
+            if (index < comparisons.lastIndex) {
+                Divider(modifier = Modifier.padding(top = 4.dp))
+            }
         }
     }
 }
