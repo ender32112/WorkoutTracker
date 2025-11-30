@@ -98,6 +98,11 @@ class NutritionAiRepository private constructor(context: Context) {
         prefs.edit().putString(key, json).apply()
     }
 
+    fun copyPlanToDate(fromDate: String, toDate: String) {
+        val plan = loadCachedPlan(fromDate) ?: return
+        saveCachedPlan(toDate, plan.copy(date = toDate))
+    }
+
     // ---------- Публичный метод ----------
 
     suspend fun generatePersonalizedPlan(
@@ -331,6 +336,143 @@ class NutritionAiRepository private constructor(context: Context) {
             targetFat = respFat,
             targetCarbs = respCarb,
             meals = meals
+        )
+    }
+
+    suspend fun replaceMeal(
+        date: String,
+        mealType: MealType,
+        currentPlan: MealPlan,
+        profile: NutritionProfile?,
+        recommendedNorm: Norm?,
+        userNorm: Map<String, Int>?,
+        comment: String?
+    ): PlannedMeal = withContext(Dispatchers.IO) {
+
+        val profileDescription = profile?.let {
+            "Пол: ${if (it.sex.name == "MALE") "мужчина" else "женщина"}, " +
+                "${it.age} лет, рост ${it.heightCm} см, вес ${it.weightKg} кг, цель — ${goalToText(it.goal)}.\n" +
+                "Любимые продукты: ${it.favoriteIngredients.joinToString().ifEmpty { "не указаны" }}.\n" +
+                "Нелюбимые продукты: ${it.dislikedIngredients.joinToString().ifEmpty { "нет" }}.\n" +
+                "Аллергии: ${it.allergies.joinToString().ifEmpty { "нет" }}."
+        } ?: "Профиль пользователя неизвестен (пол, возраст, рост, вес, цель не указаны)."
+
+        val recommendedNormText = recommendedNorm?.let {
+            "Рекомендуемая норма: ${it.calories} ккал, белки ${it.protein} г, жиры ${it.fats} г, углеводы ${it.carbs} г."
+        } ?: "Рекомендуемая норма неизвестна."
+
+        val userNormText = userNorm?.let {
+            "Пользовательская норма: ${it["calories"] ?: "?"} ккал, белки ${it["protein"] ?: "?"} г, жиры ${it["fats"] ?: "?"} г, углеводы ${it["carbs"] ?: "?"} г."
+        } ?: "Пользовательская норма не задана."
+
+        val systemPrompt = """
+            Ты нутриционист. Нужна ЗАМЕНА одного приёма пищи.
+            Верни строго JSON.
+            Формат:
+            {
+              "mealType": "BREAKFAST" | "LUNCH" | "DINNER" | "SNACK" | "OTHER",
+              "items": [
+                 {"name": "...", "grams": N, "calories": N, "protein": N, "fats": N, "carbs": N}
+              ]
+            }
+        """.trimIndent()
+
+        val userPrompt = """
+            Дата: $date
+
+            Нужно заменить приём пищи: ${mealType.name}
+            Комментарий пользователя: ${comment ?: "нет"}
+
+            Профиль:
+            $profileDescription
+
+            $recommendedNormText
+            $userNormText
+
+            Целевые макросы текущего плана: ${currentPlan.targetCalories} ккал, белки ${currentPlan.targetProtein} г, жиры ${currentPlan.targetFat} г, углеводы ${currentPlan.targetCarbs} г.
+
+            Текущий план (meals в JSON): ${gson.toJson(currentPlan.meals)}
+
+            Подбери аналогичный по калорийности и макросам приём, но учти комментарий пользователя и избегай аллергии/нелюбимых продуктов.
+            Верни только один приём пищи строго в JSON без дополнительного текста.
+        """.trimIndent()
+
+        val requestBody = ChatCompletionRequest(
+            model = LlmConfig.MODEL_ID,
+            messages = listOf(
+                ChatMessage(role = "system", content = systemPrompt),
+                ChatMessage(role = "user", content = userPrompt)
+            )
+        )
+
+        val jsonBody = gson.toJson(requestBody)
+        val body = jsonBody.toRequestBody(mediaTypeJson)
+
+        val url = LlmConfig.BASE_URL.trimEnd('/') + "/chat/completions"
+
+        val request = Request.Builder()
+            .url(url)
+            .post(body)
+            .build()
+
+        val response = client.newCall(request).execute()
+
+        if (!response.isSuccessful) {
+            val errorText = response.body?.string()
+            throw IllegalStateException("Ошибка LLM API: ${response.code} ${response.message} $errorText")
+        }
+
+        val responseText = response.body?.string()
+            ?: throw IllegalStateException("Пустой ответ от LLM API")
+
+        val chatResponse = gson.fromJson(responseText, ChatCompletionResponse::class.java)
+
+        val content = chatResponse.choices.firstOrNull()?.message?.content
+            ?: throw IllegalStateException("Пустой content в ответе модели")
+
+        val rootElement = gson.fromJson(content, com.google.gson.JsonElement::class.java)
+
+        val json: JsonObject = when {
+            rootElement.isJsonObject -> rootElement.asJsonObject
+            rootElement.isJsonPrimitive && rootElement.asJsonPrimitive.isString -> {
+                val inner = rootElement.asJsonPrimitive.asString
+                gson.fromJson(inner, JsonObject::class.java)
+            }
+            else -> {
+                throw IllegalStateException("Ожидался JSON-объект приёма пищи, но пришло: $rootElement")
+            }
+        }
+
+        val typeStr = when {
+            json.has("mealType") -> json.get("mealType").asString
+            json.has("type") -> json.get("type").asString
+            else -> throw IllegalStateException("В ответе отсутствует поле mealType/type")
+        }
+        val type = MealType.valueOf(typeStr.uppercase(Locale.ROOT))
+
+        val itemsJson = json.getAsJsonArray("items")
+            ?: throw IllegalStateException("В ответе нет массива items")
+
+        val items = itemsJson.map { element ->
+            val obj = element.asJsonObject
+            PlannedFoodItem(
+                name = obj.get("name")?.asString
+                    ?: throw IllegalStateException("У блюда нет имени"),
+                grams = obj.get("grams")?.asInt ?: 0,
+                calories = obj.get("calories")?.asInt
+                    ?: throw IllegalStateException("У блюда нет калорийности"),
+                protein = obj.get("protein")?.asInt
+                    ?: throw IllegalStateException("У блюда нет белков"),
+                fat = obj.get("fat")?.asInt ?: obj.get("fats")?.asInt
+                    ?: throw IllegalStateException("У блюда нет жиров"),
+                carbs = obj.get("carbs")?.asInt
+                    ?: throw IllegalStateException("У блюда нет углеводов")
+            )
+        }
+
+        PlannedMeal(
+            type = type,
+            items = items
         )
     }
 

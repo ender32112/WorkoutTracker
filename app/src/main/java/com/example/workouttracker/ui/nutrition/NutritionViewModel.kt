@@ -21,6 +21,7 @@ import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
@@ -45,6 +46,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val _planError = MutableStateFlow<String?>(null)
     val planError: StateFlow<String?> = _planError
+
+    private val _planMessage = MutableStateFlow<String?>(null)
+    val planMessage: StateFlow<String?> = _planMessage
 
     private val _profile = MutableStateFlow<NutritionProfile?>(null)
     val profile: StateFlow<NutritionProfile?> = _profile
@@ -325,6 +329,78 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 _isPlanLoading.value = false
             }
         }
+    }
+
+    fun replaceMeal(mealType: MealType, comment: String?) {
+        val currentPlan = _mealPlan.value
+        if (currentPlan == null) {
+            _planError.value = "План на сегодня не создан"
+            return
+        }
+
+        viewModelScope.launch {
+            _isPlanLoading.value = true
+            _planError.value = null
+            try {
+                val newMeal = nutritionAiRepository.replaceMeal(
+                    date = currentPlan.date,
+                    mealType = mealType,
+                    currentPlan = currentPlan,
+                    profile = profile.value,
+                    recommendedNorm = recommendedNorm.value,
+                    userNorm = dailyNorm,
+                    comment = comment
+                )
+                val updatedMeals = currentPlan.meals.map { existing ->
+                    if (existing.type == mealType) newMeal else existing
+                }
+                val updatedPlan = currentPlan.copy(meals = updatedMeals)
+                _mealPlan.value = updatedPlan
+                nutritionAiRepository.saveCachedPlan(currentPlan.date, updatedPlan)
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _planError.value = e.message ?: "Ошибка при замене приёма"
+            } finally {
+                _isPlanLoading.value = false
+            }
+        }
+    }
+
+    fun reuseYesterdayPlan() {
+        val formatter = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        val calendar = Calendar.getInstance()
+        val today = formatter.format(calendar.time)
+        calendar.add(Calendar.DAY_OF_YEAR, -1)
+        val yesterday = formatter.format(calendar.time)
+
+        viewModelScope.launch {
+            _isPlanLoading.value = true
+            _planError.value = null
+            try {
+                val yesterdayPlan = nutritionAiRepository.loadCachedPlan(yesterday)
+                if (yesterdayPlan == null) {
+                    _planError.value = "План за вчера отсутствует"
+                    return@launch
+                }
+                nutritionAiRepository.copyPlanToDate(yesterday, today)
+                val todayPlan = nutritionAiRepository.loadCachedPlan(today)
+                _mealPlan.value = todayPlan
+                _planMessage.value = "План перенесён с вчерашнего дня"
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _planError.value = e.message ?: "Не удалось перенести план"
+            } finally {
+                _isPlanLoading.value = false
+            }
+        }
+    }
+
+    fun hasCachedPlanForDate(date: String): Boolean {
+        return nutritionAiRepository.loadCachedPlan(date) != null
+    }
+
+    fun consumePlanMessage() {
+        _planMessage.value = null
     }
 
     fun clearPlanError() {
