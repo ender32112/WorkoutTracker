@@ -45,11 +45,15 @@ fun NutritionScreen(
     val planError by viewModel.planError.collectAsState()
     val recommendedNorm by viewModel.recommendedNorm.collectAsState()
     val profile by viewModel.profile.collectAsState()
+    val planMessage by viewModel.planMessage.collectAsState()
 
     var showAddDialog by remember { mutableStateOf(false) }
     var editEntry by remember { mutableStateOf<NutritionEntry?>(null) }
     var showSettings by remember { mutableStateOf(false) }
     var showProfileDialog by remember { mutableStateOf(false) }
+    var showReplaceDialog by remember { mutableStateOf(false) }
+    var replaceMealType by remember { mutableStateOf<MealType?>(null) }
+    var replaceComment by remember { mutableStateOf("") }
 
     val snackbarHost = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()                // ← добавили
@@ -63,7 +67,14 @@ fun NutritionScreen(
         MealType.SNACK,
         MealType.OTHER
     )
-    val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+    val formatter = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()) }
+    val today = formatter.format(Date())
+    val yesterday = remember(today) {
+        Calendar.getInstance().apply {
+            time = Date()
+            add(Calendar.DAY_OF_YEAR, -1)
+        }.let { formatter.format(it.time) }
+    }
     val todayEntries = grouped[today].orEmpty()
     val todaySummary = viewModel.getDailySummary(today)
     val todayTotal = NutritionEntry(
@@ -75,6 +86,15 @@ fun NutritionScreen(
         fats = todaySummary.fats,
         weight = todayEntries.sumOf { it.weight }
     )
+
+    val canReuseYesterdayPlan = mealPlan == null && viewModel.hasCachedPlanForDate(yesterday)
+
+    LaunchedEffect(planMessage) {
+        planMessage?.let {
+            snack(it)
+            viewModel.consumePlanMessage()
+        }
+    }
 
 
     Scaffold(
@@ -113,7 +133,14 @@ fun NutritionScreen(
                     isLoading = isPlanLoading,
                     error = planError,
                     onGenerateClick = { viewModel.generateTodayPlan() },
-                    onDismissError = { viewModel.clearPlanError() }
+                    onDismissError = { viewModel.clearPlanError() },
+                    onReplaceMeal = { type ->
+                        replaceMealType = type
+                        replaceComment = ""
+                        showReplaceDialog = true
+                    },
+                    canReuseYesterdayPlan = canReuseYesterdayPlan,
+                    onReuseYesterdayClick = { viewModel.reuseYesterdayPlan() }
                 )
             }
 
@@ -207,6 +234,40 @@ fun NutritionScreen(
                 scope.launch { snack("Нормы сохранены") }               // ← заменили LaunchedEffect
             },
             onDismiss = { showSettings = false }
+        )
+    }
+
+    if (showReplaceDialog && replaceMealType != null) {
+        AlertDialog(
+            onDismissRequest = { showReplaceDialog = false },
+            title = { Text("Замена приёма пищи") },
+            text = {
+                OutlinedTextField(
+                    value = replaceComment,
+                    onValueChange = { replaceComment = it },
+                    label = { Text("Комментарий (необязательно)") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.replaceMeal(
+                            replaceMealType!!,
+                            replaceComment.trim().ifBlank { null }
+                        )
+                        showReplaceDialog = false
+                    },
+                    enabled = !isPlanLoading
+                ) {
+                    Text("Заменить")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showReplaceDialog = false }) {
+                    Text("Отмена")
+                }
+            }
         )
     }
 
@@ -427,7 +488,10 @@ fun MealPlanCard(
     isLoading: Boolean,
     error: String?,
     onGenerateClick: () -> Unit,
-    onDismissError: () -> Unit
+    onDismissError: () -> Unit,
+    onReplaceMeal: (MealType) -> Unit,
+    canReuseYesterdayPlan: Boolean,
+    onReuseYesterdayClick: () -> Unit
 ) {
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
@@ -526,6 +590,18 @@ fun MealPlanCard(
                                     style = MaterialTheme.typography.bodySmall
                                 )
                             }
+                            Spacer(Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                OutlinedButton(
+                                    onClick = { onReplaceMeal(meal.type) },
+                                    enabled = !isLoading
+                                ) {
+                                    Text("Заменить")
+                                }
+                            }
                         }
                     }
                 }
@@ -535,6 +611,12 @@ fun MealPlanCard(
                     text = "План на сегодня ещё не создан.",
                     style = MaterialTheme.typography.bodySmall
                 )
+                if (canReuseYesterdayPlan) {
+                    Spacer(Modifier.height(8.dp))
+                    Button(onClick = onReuseYesterdayClick, enabled = !isLoading) {
+                        Text("Использовать вчерашний план")
+                    }
+                }
             }
         }
     }
