@@ -549,7 +549,23 @@ class NutritionAiRepository private constructor(context: Context) {
                         ?: throw IllegalStateException("У блюда нет жиров"),
                     carbs = it.get("carbs")?.asInt
                         ?: throw IllegalStateException("У блюда нет углеводов")
+                )
+            }
+
+            PlannedMeal(
+                type = type,
+                items = items
             )
+        }
+
+        MealPlan(
+            date = date,
+            targetCalories = goalCalories,
+            targetProtein = goalProtein,
+            targetFat = goalFats,
+            targetCarbs = goalCarbs,
+            meals = meals
+        )
     }
 
     suspend fun canonicalizeFoodName(rawName: String): String = withContext(Dispatchers.IO) {
@@ -601,22 +617,6 @@ class NutritionAiRepository private constructor(context: Context) {
             ?: throw IllegalStateException("Пустой content в ответе модели")
 
         content.trim()
-    }
-
-            PlannedMeal(
-                type = type,
-                items = items
-            )
-        }
-
-        MealPlan(
-            date = date,
-            targetCalories = goalCalories,
-            targetProtein = goalProtein,
-            targetFat = goalFats,
-            targetCarbs = goalCarbs,
-            meals = meals
-        )
     }
 
     suspend fun replaceMeal(
