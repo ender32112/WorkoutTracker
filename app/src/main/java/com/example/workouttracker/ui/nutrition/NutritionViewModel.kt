@@ -15,6 +15,7 @@ import com.example.workouttracker.ui.nutrition.NutritionProfile
 import com.example.workouttracker.ui.nutrition.Norm
 import com.example.workouttracker.ui.nutrition.ProfileRepository
 import com.example.workouttracker.llm.NutritionAiRepository
+import com.example.workouttracker.ui.nutrition.BehaviorPreferencesRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -33,6 +34,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     private val prefs = application.getSharedPreferences("nutrition_prefs_" + userId, Context.MODE_PRIVATE)
     private val profileRepository = ProfileRepository(application.applicationContext)
     private val nutritionAiRepository = NutritionAiRepository.getInstance(application.applicationContext)
+    private val behaviorRepository = BehaviorPreferencesRepository(application.applicationContext)
 
     private val _entries = MutableStateFlow<List<NutritionEntry>>(emptyList())
     val entries: StateFlow<List<NutritionEntry>> = _entries
@@ -308,6 +310,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     fun generateTodayPlan() {
         val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
         val history = getDailySummaries().take(7)
+        val dislikedByBehavior = getDislikedByBehavior()
 
         viewModelScope.launch {
             _isPlanLoading.value = true
@@ -318,7 +321,8 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                     profile = profile.value,
                     recommendedNorm = recommendedNorm.value,
                     userNorm = dailyNorm,
-                    history = history
+                    history = history,
+                    dislikedByBehavior = dislikedByBehavior
                 )
                 _mealPlan.value = plan
                 nutritionAiRepository.saveCachedPlan(today, plan)
@@ -338,6 +342,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             return
         }
 
+        val oldMeal = currentPlan.meals.firstOrNull { it.type == mealType }
+        val dislikedByBehavior = getDislikedByBehavior()
+
         viewModelScope.launch {
             _isPlanLoading.value = true
             _planError.value = null
@@ -349,8 +356,13 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                     profile = profile.value,
                     recommendedNorm = recommendedNorm.value,
                     userNorm = dailyNorm,
+                    dislikedByBehavior = dislikedByBehavior,
                     comment = comment
                 )
+                oldMeal?.let { meal ->
+                    val oldDishNames = meal.items.map { it.name }
+                    behaviorRepository.incrementDislike(oldDishNames)
+                }
                 val updatedMeals = currentPlan.meals.map { existing ->
                     if (existing.type == mealType) newMeal else existing
                 }
@@ -405,5 +417,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun clearPlanError() {
         _planError.value = null
+    }
+
+    private fun getDislikedByBehavior(): Set<String> {
+        return behaviorRepository.getDislikedByBehavior()
     }
 }
