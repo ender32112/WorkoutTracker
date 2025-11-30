@@ -8,6 +8,7 @@ import com.example.workouttracker.ui.nutrition.Norm
 import com.example.workouttracker.ui.nutrition.PlannedFoodItem
 import com.example.workouttracker.ui.nutrition.PlannedMeal
 import com.example.workouttracker.ui.nutrition.Goal
+import com.example.workouttracker.ui.nutrition.FridgeProduct
 import com.example.workouttracker.viewmodel.NutritionViewModel
 import com.google.gson.Gson
 import com.google.gson.JsonObject
@@ -349,6 +350,220 @@ class NutritionAiRepository private constructor(context: Context) {
             targetProtein = respProt,
             targetFat = respFat,
             targetCarbs = respCarb,
+            meals = meals
+        )
+    }
+
+    suspend fun generatePlanFromFridge(
+        date: String,
+        fridge: List<FridgeProduct>,
+        profile: NutritionProfile?,
+        recommendedNorm: Norm?,
+        userNorm: Map<String, Int>?,
+        history: List<NutritionViewModel.DailyNutritionSummary>,
+        dislikedByBehavior: Set<String>,
+        allowExtraProducts: Boolean,
+        goalCalories: Int,
+        goalProtein: Int,
+        goalFats: Int,
+        goalCarbs: Int
+    ): MealPlan = withContext(Dispatchers.IO) {
+
+        val profileDescription = profile?.let {
+            "Пол: ${if (it.sex.name == "MALE") "мужчина" else "женщина"}, " +
+                "${it.age} лет, рост ${it.heightCm} см, вес ${it.weightKg} кг, цель — ${goalToText(it.goal)}.\n" +
+                "Любимые продукты: ${it.favoriteIngredients.joinToString().ifEmpty { "не указаны" }}.\n" +
+                "Нелюбимые продукты: ${it.dislikedIngredients.joinToString().ifEmpty { "нет" }}.\n" +
+                "Аллергии: ${it.allergies.joinToString().ifEmpty { "нет" }}."
+        } ?: "Профиль пользователя неизвестен (пол, возраст, рост, вес, цель не указаны)."
+
+        val recommendedNormText = recommendedNorm?.let {
+            "Рекомендуемая норма: ${it.calories} ккал, белки ${it.protein} г, жиры ${it.fats} г, углеводы ${it.carbs} г."
+        } ?: "Рекомендуемая норма неизвестна."
+
+        val userNormText = userNorm?.let {
+            "Пользовательская норма: ${it["calories"] ?: "?"} ккал, белки ${it["protein"] ?: "?"} г, жиры ${it["fats"] ?: "?"} г, углеводы ${it["carbs"] ?: "?"} г."
+        } ?: "Пользовательская норма не задана."
+
+        val behaviorDislikedText = if (dislikedByBehavior.isNotEmpty()) {
+            "Список блюд, которые пользователь часто заменяет или избегает (считай, что они ему не нравятся): " +
+                dislikedByBehavior.joinToString()
+        } else {
+            "Нет явных нелюбимых блюд по поведению."
+        }
+
+        val fridgeListText = if (fridge.isNotEmpty()) {
+            fridge.joinToString(separator = "\n") { product ->
+                val availableText = product.availableGrams?.let { "$it г" } ?: "не указано"
+                "${product.name}: ${product.calories100}/${product.protein100}/${product.fats100}/${product.carbs100} на 100 г; доступно: $availableText"
+            }
+        } else {
+            "Список продуктов пуст."
+        }
+
+        val historyWindow = history.take(7)
+        val historyDetails = if (historyWindow.isNotEmpty()) {
+            historyWindow.joinToString(separator = "\n") { h ->
+                "- ${h.date}: ${h.calories} ккал (Б:${h.protein}, Ж:${h.fats}, У:${h.carbs})"
+            }
+        } else {
+            "История питания за последние дни отсутствует."
+        }
+
+        val systemPrompt = """
+            Ты диетолог и нутриционист. Тебе нужно составить план питания на день, используя продукты из холодильника пользователя.
+            Ты ДОЛЖЕН ответить строго в формате JSON, без Markdown и без дополнительного текста.
+            Формат ответа:
+            {
+              "meals": [
+                {
+                  "mealType": "BREAKFAST" | "LUNCH" | "DINNER" | "SNACK" | "OTHER",
+                  "items": [
+                    {
+                      "name": "Овсянка с ягодами",
+                      "grams": 250,
+                      "calories": 350,
+                      "protein": 15,
+                      "fat": 10,
+                      "carbs": 50
+                    }
+                  ]
+                }
+              ]
+            }
+
+            Обязательные требования:
+            - Верни только JSON без пояснений.
+            - Суммарные калории и макроэлементы по всем блюдам должны быть максимально близки к целевой норме дня.
+            - Используй 3–5 приёмов пищи, в каждом 1–3 блюда.
+            - Никогда не предлагай блюда, содержащие указанные аллергены.
+            - По возможности избегай нелюбимых продуктов из профиля и dislikedByBehavior.
+        """.trimIndent()
+
+        val allowExtraFlag = if (allowExtraProducts) "Разрешено добавлять дополнительные продукты, но сначала используй холодильник." else "Запрещено добавлять продукты вне холодильника. Если цель недостижима — приблизься максимально."
+
+        val userPrompt = """
+            Дата: $date
+
+            Продукты в холодильнике (с КБЖУ на 100 г и доступным весом):
+            $fridgeListText
+
+            Дневная цель:
+            Калории: $goalCalories
+            Белки: $goalProtein
+            Жиры: $goalFats
+            Углеводы: $goalCarbs
+
+            Профиль:
+            $profileDescription
+
+            Целевые нормы:
+            $recommendedNormText
+            $userNormText
+
+            Нелюбимые продукты:
+            ${profile?.dislikedIngredients?.joinToString().orEmpty().ifBlank { "нет" }}
+            $behaviorDislikedText
+
+            История питания (последние ${historyWindow.size} дней):
+            $historyDetails
+
+            Правила:
+            Используй продукты из холодильника как основной источник.
+            $allowExtraFlag
+            Составь 3–5 приёмов пищи.
+            Суммарные КБЖУ должны быть максимально близки к дневной цели.
+            Верни только JSON.
+        """.trimIndent()
+
+        val requestBody = ChatCompletionRequest(
+            model = LlmConfig.MODEL_ID,
+            messages = listOf(
+                ChatMessage(role = "system", content = systemPrompt),
+                ChatMessage(role = "user", content = userPrompt)
+            )
+        )
+
+        val jsonBody = gson.toJson(requestBody)
+        val body = jsonBody.toRequestBody(mediaTypeJson)
+
+        val url = LlmConfig.BASE_URL.trimEnd('/') + "/chat/completions"
+
+        val request = Request.Builder()
+            .url(url)
+            .post(body)
+            .build()
+
+        val response = client.newCall(request).execute()
+
+        if (!response.isSuccessful) {
+            val errorText = response.body?.string()
+            throw IllegalStateException("Ошибка LLM API: ${response.code} ${response.message} $errorText")
+        }
+
+        val responseText = response.body?.string()
+            ?: throw IllegalStateException("Пустой ответ от LLM API")
+
+        val chatResponse = gson.fromJson(responseText, ChatCompletionResponse::class.java)
+
+        val content = chatResponse.choices.firstOrNull()?.message?.content
+            ?: throw IllegalStateException("Пустой content в ответе модели")
+
+        val rootElement = gson.fromJson(content, com.google.gson.JsonElement::class.java)
+
+        val json: JsonObject = when {
+            rootElement.isJsonObject -> rootElement.asJsonObject
+            rootElement.isJsonPrimitive && rootElement.asJsonPrimitive.isString -> {
+                val inner = rootElement.asJsonPrimitive.asString
+                gson.fromJson(inner, JsonObject::class.java)
+            }
+            else -> {
+                throw IllegalStateException("Ожидался JSON-объект плана, но пришло: $rootElement")
+            }
+        }
+
+        val mealsJson = json.getAsJsonArray("meals")
+            ?: throw IllegalStateException("Не удалось найти массив meals в ответе модели")
+        val meals = mealsJson.map { mealElement ->
+            val mealObj = mealElement.asJsonObject
+            val typeStr = when {
+                mealObj.has("mealType") -> mealObj.get("mealType").asString
+                mealObj.has("type") -> mealObj.get("type").asString
+                else -> throw IllegalStateException("У приёма пищи отсутствует поле mealType/type")
+            }
+            val type = MealType.valueOf(typeStr.uppercase(Locale.ROOT))
+
+            val itemsJson = mealObj.getAsJsonArray("items")
+                ?: throw IllegalStateException("У приёма пищи нет массива items")
+            val items = itemsJson.map { itemElement ->
+                val it = itemElement.asJsonObject
+                PlannedFoodItem(
+                    name = it.get("name")?.asString
+                        ?: throw IllegalStateException("У блюда нет имени"),
+                    grams = it.get("grams")?.asInt ?: 0,
+                    calories = it.get("calories")?.asInt
+                        ?: throw IllegalStateException("У блюда нет калорийности"),
+                    protein = it.get("protein")?.asInt
+                        ?: throw IllegalStateException("У блюда нет белков"),
+                    fat = it.get("fat")?.asInt ?: it.get("fats")?.asInt
+                        ?: throw IllegalStateException("У блюда нет жиров"),
+                    carbs = it.get("carbs")?.asInt
+                        ?: throw IllegalStateException("У блюда нет углеводов")
+                )
+            }
+
+            PlannedMeal(
+                type = type,
+                items = items
+            )
+        }
+
+        MealPlan(
+            date = date,
+            targetCalories = goalCalories,
+            targetProtein = goalProtein,
+            targetFat = goalFats,
+            targetCarbs = goalCarbs,
             meals = meals
         )
     }
