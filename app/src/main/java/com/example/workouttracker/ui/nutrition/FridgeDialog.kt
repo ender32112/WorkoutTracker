@@ -1,6 +1,7 @@
 package com.example.workouttracker.ui.nutrition
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -8,15 +9,20 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.Divider
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -34,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.unit.dp
 
 private data class FridgeProductUi(
@@ -58,91 +65,140 @@ fun FridgeDialog(
         onDismissRequest = onDismiss,
         title = { Text("Продукты в холодильнике") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+            ) {
                 Text(
                     text = "Укажите продукты и их КБЖУ на 100 г. Можно добавить доступный вес, чтобы оценить достижимость цели.",
-                    style = MaterialTheme.typography.bodySmall
+                    style = MaterialTheme.typography.bodyMedium
                 )
+
+                ElevatedCard(
+                    colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp)
+                    ) {
+                        Checkbox(checked = allowExtraProducts, onCheckedChange = { allowExtraProducts = it })
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Text("Дополнительные продукты", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                "Разрешить использование дополнительных продуктов при необходимости",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
                 LazyColumn(
                     state = listState,
                     verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.heightIn(max = 420.dp)
+                    contentPadding = PaddingValues(vertical = 4.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 360.dp)
                 ) {
-                    itemsIndexed(products) { index, product ->
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
+                    itemsIndexed(products, key = { index, _ -> index }) { index, product ->
+                        ElevatedCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                         ) {
-                            Row(
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                modifier = Modifier.fillMaxWidth()
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp)
                             ) {
-                                Text(
-                                    text = "Продукт ${index + 1}",
-                                    style = MaterialTheme.typography.titleSmall
-                                )
-                                if (products.size > 1) {
-                                    IconButton(onClick = { products.removeAt(index) }) {
-                                        Icon(Icons.Filled.Delete, contentDescription = "Удалить")
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column {
+                                        Text(
+                                            text = "Продукт ${index + 1}",
+                                            style = MaterialTheme.typography.titleMedium
+                                        )
+                                        Text(
+                                            text = "Основные параметры",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    if (products.size > 1) {
+                                        IconButton(onClick = { products.removeAt(index) }) {
+                                            Icon(Icons.Filled.Delete, contentDescription = "Удалить")
+                                        }
+                                    } else {
+                                        Box(modifier = Modifier.size(24.dp))
                                     }
                                 }
-                            }
-                            OutlinedTextField(
-                                value = product.name,
-                                onValueChange = { products[index] = products[index].copy(name = it) },
-                                label = { Text("Название") },
-                                modifier = Modifier.fillMaxWidth(),
-                                singleLine = true
-                            )
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+
+                                OutlinedTextField(
+                                    value = product.name,
+                                    onValueChange = { products[index] = products[index].copy(name = it) },
+                                    label = { Text("Название") },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    singleLine = true
+                                )
+
+                                Text(
+                                    text = "КБЖУ на 100 г",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
                                 OutlinedTextField(
                                     value = product.calories100,
                                     onValueChange = { products[index] = products[index].copy(calories100 = it.filter { ch -> ch.isDigit() }) },
-                                    label = { Text("Ккал/100г") },
-                                    modifier = Modifier.weight(1f),
+                                    label = { Text("Ккал / 100 г") },
+                                    modifier = Modifier.fillMaxWidth(),
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                                 )
                                 OutlinedTextField(
                                     value = product.protein100,
                                     onValueChange = { products[index] = products[index].copy(protein100 = it.filter { ch -> ch.isDigit() }) },
-                                    label = { Text("Б/100г") },
-                                    modifier = Modifier.weight(1f),
+                                    label = { Text("Белки / 100 г") },
+                                    modifier = Modifier.fillMaxWidth(),
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                                 )
                                 OutlinedTextField(
                                     value = product.fats100,
                                     onValueChange = { products[index] = products[index].copy(fats100 = it.filter { ch -> ch.isDigit() }) },
-                                    label = { Text("Ж/100г") },
-                                    modifier = Modifier.weight(1f),
+                                    label = { Text("Жиры / 100 г") },
+                                    modifier = Modifier.fillMaxWidth(),
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                                 )
                                 OutlinedTextField(
                                     value = product.carbs100,
                                     onValueChange = { products[index] = products[index].copy(carbs100 = it.filter { ch -> ch.isDigit() }) },
-                                    label = { Text("У/100г") },
-                                    modifier = Modifier.weight(1f),
+                                    label = { Text("Углеводы / 100 г") },
+                                    modifier = Modifier.fillMaxWidth(),
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                                 )
+                                OutlinedTextField(
+                                    value = product.availableGrams,
+                                    onValueChange = { products[index] = products[index].copy(availableGrams = it.filter { ch -> ch.isDigit() }) },
+                                    label = { Text("Доступно (г)") },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    singleLine = true
+                                )
                             }
-                            OutlinedTextField(
-                                value = product.availableGrams,
-                                onValueChange = { products[index] = products[index].copy(availableGrams = it.filter { ch -> ch.isDigit() }) },
-                                label = { Text("Доступно (г)") },
-                                modifier = Modifier.fillMaxWidth(),
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                singleLine = true
-                            )
-                            Divider(modifier = Modifier.padding(top = 8.dp))
                         }
                     }
                 }
                 OutlinedButton(onClick = { products.add(FridgeProductUi()) }) {
-                    Text("Добавить продукт")
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = allowExtraProducts, onCheckedChange = { allowExtraProducts = it })
+                    Icon(Icons.Filled.Add, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Разрешить использование дополнительных продуктов при необходимости")
+                    Text("Добавить продукт")
                 }
             }
         },
