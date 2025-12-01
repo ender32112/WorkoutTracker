@@ -607,6 +607,13 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun resetTodayPlan() {
+        val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        _mealPlan.value = null
+        nutritionAiRepository.clearCachedPlan(today)
+        _planError.value = null
+    }
+
     fun hasCachedPlanForDate(date: String): Boolean {
         return nutritionAiRepository.loadCachedPlan(date) != null
     }

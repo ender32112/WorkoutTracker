@@ -104,6 +104,11 @@ class NutritionAiRepository private constructor(context: Context, private val us
         saveCachedPlan(toDate, plan.copy(date = toDate))
     }
 
+    fun clearCachedPlan(date: String) {
+        val key = "meal_plan_" + date
+        prefs.edit().remove(key).apply()
+    }
+
     // ---------- Публичный метод ----------
 
     suspend fun generatePersonalizedPlan(
