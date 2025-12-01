@@ -65,6 +65,7 @@ fun NutritionScreen(
     var replaceMealType by remember { mutableStateOf<MealType?>(null) }
     var replaceComment by remember { mutableStateOf("") }
     var showFridgeChoiceDialog by remember { mutableStateOf(false) }
+    var showRegenerateWarning by remember { mutableStateOf(false) }
     var showFridgeDialog by remember { mutableStateOf(false) }
     var showAnalyticsScreen by remember { mutableStateOf(false) }
 
@@ -155,9 +156,9 @@ fun NutritionScreen(
                     isLoading = isPlanLoading,
                     error = planError,
                     onGenerateClick = {
-                        val planExists = viewModel.hasCachedPlanForDate(today)
+                        val planExists = mealPlan != null || viewModel.hasCachedPlanForDate(today)
                         if (planExists) {
-                            viewModel.setPlanError("План на сегодня уже создан")
+                            showRegenerateWarning = true
                         } else {
                             showFridgeChoiceDialog = true
                         }
@@ -248,6 +249,31 @@ fun NutritionScreen(
                     onClose = { showAnalyticsScreen = false }
                 )
             }
+    }
+
+    if (showRegenerateWarning) {
+        AlertDialog(
+            onDismissRequest = { showRegenerateWarning = false },
+            title = { Text("Обновить план") },
+            text = { Text("Текущий план будет удалён. Продолжить генерацию заново?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showRegenerateWarning = false
+                        viewModel.resetTodayPlan()
+                        showFridgeChoiceDialog = true
+                    },
+                    enabled = !isPlanLoading
+                ) {
+                    Text("Продолжить")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRegenerateWarning = false }) {
+                    Text("Отмена")
+                }
+            }
+        )
     }
 
     if (showFridgeChoiceDialog) {
