@@ -1,6 +1,7 @@
 package com.example.workouttracker.ui.nutrition
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -8,11 +9,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
@@ -63,11 +65,39 @@ fun FridgeDialog(
         onDismissRequest = onDismiss,
         title = { Text("Продукты в холодильнике") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+            ) {
                 Text(
                     text = "Укажите продукты и их КБЖУ на 100 г. Можно добавить доступный вес, чтобы оценить достижимость цели.",
                     style = MaterialTheme.typography.bodyMedium
                 )
+
+                ElevatedCard(
+                    colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp)
+                    ) {
+                        Checkbox(checked = allowExtraProducts, onCheckedChange = { allowExtraProducts = it })
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Text("Дополнительные продукты", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                "Разрешить использование дополнительных продуктов при необходимости",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
                 LazyColumn(
                     state = listState,
                     verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -169,28 +199,6 @@ fun FridgeDialog(
                     Icon(Icons.Filled.Add, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Добавить продукт")
-                }
-                ElevatedCard(
-                    colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp)
-                    ) {
-                        Checkbox(checked = allowExtraProducts, onCheckedChange = { allowExtraProducts = it })
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            Text("Дополнительные продукты", style = MaterialTheme.typography.titleSmall)
-                            Text(
-                                "Разрешить использование дополнительных продуктов при необходимости",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
                 }
             }
         },
