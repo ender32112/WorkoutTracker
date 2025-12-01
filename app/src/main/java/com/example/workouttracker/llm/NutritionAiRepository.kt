@@ -57,10 +57,10 @@ data class ChatMessageContent(
  * Репозиторий, который общается с LLM через HTTP и
  * возвращает MealPlan для ViewModel.
  */
-class NutritionAiRepository private constructor(context: Context) {
+class NutritionAiRepository private constructor(context: Context, private val userId: String) {
 
     private val gson = Gson()
-    private val prefs = context.applicationContext.getSharedPreferences("nutrition_cache", Context.MODE_PRIVATE)
+    private val prefs = context.applicationContext.getSharedPreferences("nutrition_cache_${'$'}userId", Context.MODE_PRIVATE)
 
     // ---------- OkHttp клиент ----------
 
@@ -776,11 +776,13 @@ class NutritionAiRepository private constructor(context: Context) {
 
     companion object {
         @Volatile
-        private var instance: NutritionAiRepository? = null
+        private var instances: MutableMap<String, NutritionAiRepository> = mutableMapOf()
 
-        fun getInstance(context: Context): NutritionAiRepository {
-            return instance ?: synchronized(this) {
-                instance ?: NutritionAiRepository(context.applicationContext).also { instance = it }
+        fun getInstance(context: Context, userId: String): NutritionAiRepository {
+            return instances[userId] ?: synchronized(this) {
+                instances[userId] ?: NutritionAiRepository(context.applicationContext, userId).also {
+                    instances[userId] = it
+                }
             }
         }
     }

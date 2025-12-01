@@ -5,10 +5,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
@@ -50,6 +52,7 @@ fun FridgeDialog(
 ) {
     var allowExtraProducts by remember { mutableStateOf(true) }
     val products = remember { mutableStateListOf(FridgeProductUi()) }
+    val listState = rememberLazyListState()
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -60,7 +63,11 @@ fun FridgeDialog(
                     text = "Укажите продукты и их КБЖУ на 100 г. Можно добавить доступный вес, чтобы оценить достижимость цели.",
                     style = MaterialTheme.typography.bodySmall
                 )
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                LazyColumn(
+                    state = listState,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.heightIn(max = 420.dp)
+                ) {
                     itemsIndexed(products) { index, product ->
                         Column(
                             modifier = Modifier

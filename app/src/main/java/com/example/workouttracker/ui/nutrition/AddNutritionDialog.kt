@@ -115,19 +115,18 @@ fun AddNutritionDialog(
 
     val totalWeightDish = ingredients.sumOf { it.weightInDish.toIntOrNull()?.takeIf { w -> w > 0 } ?: 0 }
 
-    fun parseMacro(value: String): Int {
-        val floatValue = value.replace(',', '.').toFloatOrNull() ?: 0f
-        return floatValue.roundToInt()
+    fun parseMacro(value: String): Float {
+        return value.replace(',', '.').toFloatOrNull()?.coerceAtLeast(0f) ?: 0f
     }
 
-    fun weightedMacro(selector: (DishIngredientUi) -> Int): Int {
-        if (totalWeightDish == 0) return 0
+    fun weightedMacro(selector: (DishIngredientUi) -> Float): Float {
+        if (totalWeightDish == 0) return 0f
         val numerator = ingredients.sumOf { ingredient ->
             val weight = ingredient.weightInDish.toIntOrNull()?.takeIf { it > 0 } ?: 0
             val macro = selector(ingredient)
-            macro * weight
+            (macro * weight).toDouble()
         }
-        return numerator / totalWeightDish
+        return (numerator / totalWeightDish).toFloat()
     }
 
     val dishCaloriesPer100g = weightedMacro { parseMacro(it.caloriesPer100g) }
@@ -135,10 +134,10 @@ fun AddNutritionDialog(
     val dishFatsPer100g = weightedMacro { parseMacro(it.fatsPer100g) }
     val dishCarbsPer100g = weightedMacro { parseMacro(it.carbsPer100g) }
 
-    val portionCalories = dishCaloriesPer100g * parsedPortionWeight / 100
-    val portionProtein = dishProteinPer100g * parsedPortionWeight / 100
-    val portionFats = dishFatsPer100g * parsedPortionWeight / 100
-    val portionCarbs = dishCarbsPer100g * parsedPortionWeight / 100
+    val portionCalories = (dishCaloriesPer100g * parsedPortionWeight / 100f).roundToInt()
+    val portionProtein = (dishProteinPer100g * parsedPortionWeight / 100f).roundToInt()
+    val portionFats = (dishFatsPer100g * parsedPortionWeight / 100f).roundToInt()
+    val portionCarbs = (dishCarbsPer100g * parsedPortionWeight / 100f).roundToInt()
 
     var showDatePicker by remember { mutableStateOf(false) }
     if (showDatePicker) {

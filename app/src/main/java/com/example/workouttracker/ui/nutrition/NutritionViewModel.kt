@@ -40,8 +40,8 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     private val userId = authPrefs.getString(AuthViewModel.KEY_CURRENT_USER_ID, null) ?: "guest"
     private val prefs = application.getSharedPreferences("nutrition_prefs_" + userId, Context.MODE_PRIVATE)
     private val profileRepository = ProfileRepository(application.applicationContext)
-    private val nutritionAiRepository = NutritionAiRepository.getInstance(application.applicationContext)
-    private val behaviorRepository = BehaviorPreferencesRepository(application.applicationContext)
+    private val nutritionAiRepository = NutritionAiRepository.getInstance(application.applicationContext, userId)
+    private val behaviorRepository = BehaviorPreferencesRepository(application.applicationContext, userId)
     private val foodCanonicalizer = FoodCanonicalizer(application.applicationContext, nutritionAiRepository)
     private val analyticsEngine = NutritionAnalyticsEngine(foodCanonicalizer)
 
@@ -307,10 +307,10 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         return Ingredient(
             id = obj.optString("id", null)?.let { UUID.fromString(it) } ?: UUID.randomUUID(),
             name = obj.optString("name", ""),
-            caloriesPer100g = obj.optInt("caloriesPer100g", 0),
-            proteinPer100g = obj.optInt("proteinPer100g", 0),
-            fatsPer100g = obj.optInt("fatsPer100g", 0),
-            carbsPer100g = obj.optInt("carbsPer100g", 0)
+            caloriesPer100g = obj.optDouble("caloriesPer100g", 0.0).toFloat(),
+            proteinPer100g = obj.optDouble("proteinPer100g", 0.0).toFloat(),
+            fatsPer100g = obj.optDouble("fatsPer100g", 0.0).toFloat(),
+            carbsPer100g = obj.optDouble("carbsPer100g", 0.0).toFloat()
         )
     }
 
@@ -323,10 +323,10 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         val carbs = obj.optInt("carbs", 0)
         val ingredient = Ingredient(
             name = name,
-            caloriesPer100g = if (weight > 0) calories * 100 / weight else 0,
-            proteinPer100g = if (weight > 0) protein * 100 / weight else 0,
-            fatsPer100g = if (weight > 0) fats * 100 / weight else 0,
-            carbsPer100g = if (weight > 0) carbs * 100 / weight else 0
+            caloriesPer100g = if (weight > 0) calories * 100f / weight else 0f,
+            proteinPer100g = if (weight > 0) protein * 100f / weight else 0f,
+            fatsPer100g = if (weight > 0) fats * 100f / weight else 0f,
+            carbsPer100g = if (weight > 0) carbs * 100f / weight else 0f
         )
         val dishIngredient = DishIngredient(
             ingredient = ingredient,

@@ -1,14 +1,15 @@
 package com.example.workouttracker.ui.nutrition
 
 import java.util.UUID
+import kotlin.math.roundToInt
 
 data class Ingredient(
     val id: UUID = UUID.randomUUID(),
     val name: String,
-    val caloriesPer100g: Int,
-    val proteinPer100g: Int,
-    val fatsPer100g: Int,
-    val carbsPer100g: Int
+    val caloriesPer100g: Float,
+    val proteinPer100g: Float,
+    val fatsPer100g: Float,
+    val carbsPer100g: Float
 )
 
 data class DishIngredient(
@@ -25,23 +26,23 @@ data class Dish(
     val totalWeight: Int
         get() = ingredients.sumOf { it.weightInDish }
 
-    val caloriesPer100g: Int
+    val caloriesPer100g: Float
         get() = weightedMacro { caloriesPer100g }
 
-    val proteinPer100g: Int
+    val proteinPer100g: Float
         get() = weightedMacro { proteinPer100g }
 
-    val fatsPer100g: Int
+    val fatsPer100g: Float
         get() = weightedMacro { fatsPer100g }
 
-    val carbsPer100g: Int
+    val carbsPer100g: Float
         get() = weightedMacro { carbsPer100g }
 
-    private fun weightedMacro(selector: Ingredient.() -> Int): Int {
+    private fun weightedMacro(selector: Ingredient.() -> Float): Float {
         val total = totalWeight
-        if (total == 0) return 0
-        val numerator = ingredients.sumOf { it.ingredient.selector() * it.weightInDish }
-        return numerator / total
+        if (total == 0) return 0f
+        val numerator = ingredients.sumOf { (it.ingredient.selector() * it.weightInDish).toDouble() }
+        return (numerator / total).toFloat()
     }
 }
 
@@ -53,16 +54,16 @@ data class NutritionEntry(
     val portionWeight: Int
 ) {
     val calories: Int
-        get() = dish.caloriesPer100g * portionWeight / 100
+        get() = (dish.caloriesPer100g * portionWeight / 100f).roundToInt()
 
     val protein: Int
-        get() = dish.proteinPer100g * portionWeight / 100
+        get() = (dish.proteinPer100g * portionWeight / 100f).roundToInt()
 
     val fats: Int
-        get() = dish.fatsPer100g * portionWeight / 100
+        get() = (dish.fatsPer100g * portionWeight / 100f).roundToInt()
 
     val carbs: Int
-        get() = dish.carbsPer100g * portionWeight / 100
+        get() = (dish.carbsPer100g * portionWeight / 100f).roundToInt()
 
     val name: String
         get() = dish.name
@@ -90,10 +91,10 @@ data class NutritionEntry(
                 DishIngredient(
                     ingredient = Ingredient(
                         name = name,
-                        caloriesPer100g = if (weight > 0) calories * 100 / weight else 0,
-                        proteinPer100g = if (weight > 0) protein * 100 / weight else 0,
-                        fatsPer100g = if (weight > 0) fats * 100 / weight else 0,
-                        carbsPer100g = if (weight > 0) carbs * 100 / weight else 0
+                        caloriesPer100g = if (weight > 0) calories * 100f / weight else 0f,
+                        proteinPer100g = if (weight > 0) protein * 100f / weight else 0f,
+                        fatsPer100g = if (weight > 0) fats * 100f / weight else 0f,
+                        carbsPer100g = if (weight > 0) carbs * 100f / weight else 0f
                     ),
                     weightInDish = weight
                 )
