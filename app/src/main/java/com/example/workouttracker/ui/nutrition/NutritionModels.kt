@@ -140,3 +140,34 @@ data class MealPlan(
     val targetCarbs: Int,
     val meals: List<PlannedMeal>
 )
+
+enum class ActivityLevel {
+    SEDENTARY,
+    LIGHT,
+    MODERATE,
+    ACTIVE,
+    VERY_ACTIVE
+}
+
+enum class ClinicalDiet {
+    NONE,
+    DIABETES,
+    RENAL,
+    CARDIAC,
+    GASTROINTESTINAL,
+    CUSTOM
+}
+
+data class DietConstraints(
+    val maxSodiumMgPerDay: Int? = null,
+    val maxPotassiumMgPerDay: Int? = null,
+    val maxPhosphorusMgPerDay: Int? = null,
+    val proteinGrPerDay: Int? = null,
+    val carbsGrPerDay: Int? = null,
+    val fatGrPerDay: Int? = null,
+    val textureRequirement: String? = null,
+    val forbiddenIngredients: List<String> = emptyList(),
+    val clinicianName: String? = null,
+    val prescriptionDate: String? = null,
+    val strict: Boolean = true
+)

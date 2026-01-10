@@ -17,6 +17,9 @@ data class NutritionProfile(
     val heightCm: Int,
     val weightKg: Float,
     val goal: Goal,
+    val activityLevel: ActivityLevel = ActivityLevel.MODERATE,
+    val clinicalDiet: ClinicalDiet = ClinicalDiet.NONE,
+    val dietConstraints: DietConstraints? = null,
     val favoriteIngredients: List<String> = emptyList(),
     val dislikedIngredients: List<String> = emptyList(),
     val allergies: List<String> = emptyList()
