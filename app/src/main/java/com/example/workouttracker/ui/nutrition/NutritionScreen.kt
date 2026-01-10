@@ -402,6 +402,9 @@ fun NutritionScreen(
             onSave = { newProfile ->
                 viewModel.updateProfile(newProfile)
             },
+            onSyncFromMainProfile = {
+                viewModel.syncFromMainProfile()
+            },
             onDismiss = { showProfileDialog = false }
         )
     }
@@ -746,4 +749,3 @@ fun MealPlanCard(
         }
     }
 }
-

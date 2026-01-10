@@ -14,6 +14,8 @@ import com.example.workouttracker.ui.nutrition.NutritionCalculator
 import com.example.workouttracker.ui.nutrition.NutritionProfile
 import com.example.workouttracker.ui.nutrition.Norm
 import com.example.workouttracker.ui.nutrition.ProfileRepository
+import com.example.workouttracker.ui.nutrition.Goal
+import com.example.workouttracker.ui.nutrition.Sex
 import com.example.workouttracker.llm.NutritionAiRepository
 import com.example.workouttracker.ui.nutrition.BehaviorPreferencesRepository
 import com.example.workouttracker.ui.nutrition.FridgeProduct
@@ -79,6 +81,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     private val _foodRatings = MutableStateFlow<List<FoodRating>>(emptyList())
     val foodRatings: StateFlow<List<FoodRating>> = _foodRatings
 
+    private val _autoAdjustEnabled = MutableStateFlow(prefs.getBoolean(KEY_AUTO_ADJUST, true))
+    val autoAdjustEnabled: StateFlow<Boolean> = _autoAdjustEnabled
+
     var dailyNorm = mapOf<String, Int>()
 
     data class DailyNutritionSummary(
@@ -100,6 +105,14 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         val fridge: List<FridgeProduct>
     )
 
+    private data class MainProfileFields(
+        val sex: Sex,
+        val age: Int,
+        val heightCm: Int,
+        val weightKg: Float,
+        val goal: Goal
+    )
+
     init {
         dailyNorm = mapOf(
             "calories" to prefs.getInt("norm_calories", 2500),
@@ -107,7 +120,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             "carbs"    to prefs.getInt("norm_carbs", 300),
             "fats"     to prefs.getInt("norm_fats", 80)
         )
-        _profile.value = profileRepository.loadProfile()
+        _profile.value = mergeWithMainProfile(profileRepository.loadProfile(), loadMainProfileFields())
         _recommendedNorm.value = _profile.value?.let { NutritionCalculator.calculateRecommendedNorm(it) }
         loadEntries()
 
@@ -116,6 +129,84 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         if (cached != null) {
             _mealPlan.value = cached
         }
+    }
+
+    private fun mergeWithMainProfile(
+        localProfile: NutritionProfile?,
+        mainProfile: MainProfileFields?
+    ): NutritionProfile? {
+        if (localProfile != null) return localProfile
+        if (mainProfile == null) return null
+        return NutritionProfile(
+            sex = mainProfile.sex,
+            age = mainProfile.age,
+            heightCm = mainProfile.heightCm,
+            weightKg = mainProfile.weightKg,
+            goal = mainProfile.goal
+        )
+    }
+
+    private fun loadMainProfileFields(): MainProfileFields? {
+        val mainPrefs = application.getSharedPreferences("user_profile_" + userId, Context.MODE_PRIVATE)
+        val age = mainPrefs.getInt("age", 0)
+        val height = mainPrefs.getFloat("height", 0f)
+        val weight = mainPrefs.getFloat("weight", 0f)
+        val gender = mainPrefs.getString("gender", "").orEmpty()
+        val goalName = mainPrefs.getString("goalName", "").orEmpty()
+
+        if (age <= 0 || height <= 0f || weight <= 0f || gender.isBlank()) return null
+
+        val sex = when (gender.trim().lowercase(Locale.getDefault())) {
+            "мужчина", "male", "m" -> Sex.MALE
+            "женщина", "female", "f" -> Sex.FEMALE
+            else -> Sex.MALE
+        }
+
+        val goal = when {
+            goalName.contains("похуд", ignoreCase = true) -> Goal.LOSE_WEIGHT
+            goalName.contains("набор", ignoreCase = true) -> Goal.GAIN_WEIGHT
+            goalName.contains("gain", ignoreCase = true) -> Goal.GAIN_WEIGHT
+            goalName.contains("loss", ignoreCase = true) -> Goal.LOSE_WEIGHT
+            else -> Goal.MAINTAIN_WEIGHT
+        }
+
+        return MainProfileFields(
+            sex = sex,
+            age = age,
+            heightCm = height.roundToInt(),
+            weightKg = weight,
+            goal = goal
+        )
+    }
+
+    fun syncFromMainProfile() {
+        val mainProfile = loadMainProfileFields() ?: return
+        val current = _profile.value
+        val updated = if (current == null) {
+            NutritionProfile(
+                sex = mainProfile.sex,
+                age = mainProfile.age,
+                heightCm = mainProfile.heightCm,
+                weightKg = mainProfile.weightKg,
+                goal = mainProfile.goal
+            )
+        } else {
+            current.copy(
+                sex = mainProfile.sex,
+                age = mainProfile.age,
+                heightCm = mainProfile.heightCm,
+                weightKg = mainProfile.weightKg,
+                goal = mainProfile.goal
+            )
+        }
+        _profile.value = updated
+        _recommendedNorm.value = NutritionCalculator.calculateRecommendedNorm(updated)
+        profileRepository.saveProfile(updated)
+    }
+
+    fun setAutoAdjustEnabled(enabled: Boolean) {
+        _autoAdjustEnabled.value = enabled
+        prefs.edit().putBoolean(KEY_AUTO_ADJUST, enabled).apply()
     }
 
     fun getEntriesByDate(date: String): Map<MealType, List<NutritionEntry>> {
@@ -632,5 +723,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
 
     private fun getDislikedByBehavior(): Set<String> {
         return behaviorRepository.getDislikedByBehavior()
+    }
+
+    companion object {
+        private const val KEY_AUTO_ADJUST = "auto_adjust_enabled"
     }
 }

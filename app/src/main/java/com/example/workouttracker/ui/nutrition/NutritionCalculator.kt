@@ -10,9 +10,16 @@ data class Norm(
 )
 
 object NutritionCalculator {
-    private const val ACTIVITY_FACTOR = 1.45f
     private const val PROTEIN_PER_KG = 1.8f
     private const val FATS_PER_KG = 0.9f
+
+    fun activityFactorFor(level: ActivityLevel): Float = when (level) {
+        ActivityLevel.SEDENTARY -> 1.2f
+        ActivityLevel.LIGHT -> 1.375f
+        ActivityLevel.MODERATE -> 1.55f
+        ActivityLevel.ACTIVE -> 1.725f
+        ActivityLevel.VERY_ACTIVE -> 1.9f
+    }
 
     fun calculateRecommendedNorm(profile: NutritionProfile): Norm {
         val bmr = when (profile.sex) {
@@ -20,7 +27,7 @@ object NutritionCalculator {
             Sex.FEMALE -> 10 * profile.weightKg + 6.25f * profile.heightCm - 5f * profile.age - 161
         }
 
-        val maintenanceCalories = bmr * ACTIVITY_FACTOR
+        val maintenanceCalories = bmr * activityFactorFor(profile.activityLevel)
         val adjustedCalories = when (profile.goal) {
             Goal.LOSE_WEIGHT -> maintenanceCalories * 0.85f
             Goal.MAINTAIN_WEIGHT -> maintenanceCalories
