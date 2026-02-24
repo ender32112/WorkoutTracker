@@ -14,9 +14,8 @@ import com.example.workouttracker.ui.training.ActiveWorkoutUiState
 import com.example.workouttracker.ui.training.ExerciseCatalogItem
 import com.example.workouttracker.ui.training.ExercisePrUi
 import com.example.workouttracker.ui.training.ExerciseSetInput
-import com.example.workouttracker.ui.training.ExerciseEntry
-import com.example.workouttracker.ui.training.TrainingSession
 import com.example.workouttracker.ui.training.WeeklyVolumeUi
+import com.example.workouttracker.ui.training.TrainingSession
 import com.example.workouttracker.ui.training.WorkoutExerciseInput
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -27,13 +26,11 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 class TrainingViewModel(application: Application) : AndroidViewModel(application) {
     private val authPrefs = application.getSharedPreferences(AuthViewModel.AUTH_PREFS_NAME, Context.MODE_PRIVATE)
     private val userId = authPrefs.getString(AuthViewModel.KEY_CURRENT_USER_ID, null) ?: "guest"
+
     private val dao = WorkoutTrackerDatabase.getInstance(application).dao()
 
     private val searchQuery = MutableStateFlow("")
@@ -45,7 +42,7 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
     private var timerJob: Job? = null
 
     val allExercises: StateFlow<List<ExerciseCatalogItem>> = dao.observeExercises(userId)
-        .map { list -> list.map(::toExerciseCatalogItem) }
+        .map { list -> list.map { it.toUi() } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val quickAddExercises: StateFlow<List<ExerciseCatalogItem>> = combine(
@@ -57,31 +54,21 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
             val queryPass = query.isBlank() || ex.name.contains(query, true) || (ex.aliases ?: "").contains(query, true)
             val musclePass = muscle.isNullOrBlank() || ex.muscles.contains(muscle, true)
             queryPass && musclePass
-        }.sortedWith(
-            compareByDescending<ExerciseEntity> { it.isFavorite }
-                .thenByDescending { it.lastUsedAt ?: 0L }
-                .thenBy { it.name }
-        ).map(::toExerciseCatalogItem)
+        }.sortedWith(compareByDescending<ExerciseEntity> { it.isFavorite }.thenByDescending { it.lastUsedAt ?: 0L }.thenBy { it.name })
+            .map { it.toUi() }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val favorites: StateFlow<List<ExerciseCatalogItem>> = dao.observeFavorites(userId)
-        .map { items -> items.map(::toExerciseCatalogItem) }
+        .map { it.map(ExerciseEntity::toUi) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val recentExercises: StateFlow<List<ExerciseCatalogItem>> = dao.observeRecentExercises(userId)
-        .map { items -> items.map(::toExerciseCatalogItem) }
+        .map { it.map(ExerciseEntity::toUi) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+
     val sessions: StateFlow<List<TrainingSession>> = dao.observePerformedSessions(userId)
-        .map { list ->
-            val fmt = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-            list.map {
-                TrainingSession(
-                    date = fmt.format(Date(it.startedAt)),
-                    exercises = emptyList<ExerciseEntry>()
-                )
-            }
-        }
+        .map { list -> list.map { TrainingSession(date = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date(it.startedAt)), exercises = emptyList()) } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val exercisePr: StateFlow<List<ExercisePrUi>> = dao.observeExercisePr(userId)
@@ -100,13 +87,8 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun setSearchQuery(query: String) {
-        searchQuery.value = query
-    }
-
-    fun setMuscleFilter(muscle: String?) {
-        muscleFilter.value = muscle
-    }
+    fun setSearchQuery(query: String) { searchQuery.value = query }
+    fun setMuscleFilter(muscle: String?) { muscleFilter.value = muscle }
 
     fun addOrUpdateExercise(
         id: Long? = null,
@@ -118,13 +100,13 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
         photoUri: String?
     ) {
         viewModelScope.launch {
-            val safeName = name.trim()
-            if (safeName.isBlank()) return@launch
+            val safe = name.trim()
+            if (safe.isBlank()) return@launch
             dao.upsertExercise(
                 ExerciseEntity(
                     id = id ?: 0,
                     userId = userId,
-                    name = safeName,
+                    name = safe,
                     aliases = aliases.trim().ifBlank { null },
                     muscles = muscles.joinToString(","),
                     equipment = equipment?.trim()?.ifBlank { null },
@@ -165,20 +147,19 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun removeSet(exerciseId: Long, setIndex: Int) {
-        mutateExercise(exerciseId) { exercise ->
-            if (exercise.sets.size <= 1) exercise
-            else exercise.copy(sets = exercise.sets.filterIndexed { idx, _ -> idx != setIndex })
+        mutateExercise(exerciseId) {
+            if (it.sets.size <= 1) it else it.copy(sets = it.sets.filterIndexed { i, _ -> i != setIndex })
         }
     }
 
     fun updateSet(exerciseId: Long, setIndex: Int, weight: String? = null, reps: String? = null) {
-        mutateExercise(exerciseId) { exercise ->
-            exercise.copy(
-                sets = exercise.sets.mapIndexed { idx, set ->
-                    if (idx != setIndex) set
-                    else set.copy(weight = weight ?: set.weight, reps = reps ?: set.reps)
-                }
-            )
+        mutateExercise(exerciseId) { ex ->
+            ex.copy(sets = ex.sets.mapIndexed { idx, set ->
+                if (idx != setIndex) set else set.copy(
+                    weight = weight ?: set.weight,
+                    reps = reps ?: set.reps
+                )
+            })
         }
     }
 
@@ -191,10 +172,7 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
             while (left > 0) {
                 delay(1000)
                 left -= 1
-                _activeWorkout.value = _activeWorkout.value?.copy(
-                    restTimerSecondsLeft = left,
-                    timerRunning = left > 0
-                )
+                _activeWorkout.value = _activeWorkout.value?.copy(restTimerSecondsLeft = left, timerRunning = left > 0)
             }
             persistActiveWorkout()
         }
@@ -210,20 +188,14 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
     fun finishWorkout() {
         val active = _activeWorkout.value ?: return
         viewModelScope.launch {
-            val performed = active.exercises.mapNotNull { exercise ->
-                val sets = exercise.sets.mapNotNull { set ->
-                    val weight = set.weight.toFloatOrNull()
-                    val reps = set.reps.toIntOrNull()
-                    if (weight == null || reps == null) null else PerformedSetDraft(weight = weight, reps = reps)
+            val performed = active.exercises.mapNotNull { ex ->
+                val sets = ex.sets.mapNotNull {
+                    val w = it.weight.toFloatOrNull()
+                    val r = it.reps.toIntOrNull()
+                    if (w == null || r == null) null else PerformedSetDraft(w, r)
                 }
-                if (sets.isEmpty()) null
-                else PerformedExerciseDraft(
-                    exerciseId = exercise.exerciseId,
-                    exerciseName = exercise.exerciseName,
-                    sets = sets
-                )
+                if (sets.isEmpty()) null else PerformedExerciseDraft(ex.exerciseId, ex.exerciseName, sets)
             }
-
             if (performed.isNotEmpty()) {
                 dao.persistWorkoutPerformed(
                     userId = userId,
@@ -234,7 +206,6 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
             } else {
                 dao.clearActiveWorkoutState(userId)
             }
-
             _activeWorkout.value = null
             timerJob?.cancel()
         }
@@ -257,12 +228,12 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
                 append(active.restTimerSecondsLeft)
                 append("|")
                 append(active.timerRunning)
-                active.exercises.forEach { exercise ->
+                active.exercises.forEach { ex ->
                     append("||")
-                    append(exercise.exerciseId)
+                    append(ex.exerciseId)
                     append(";")
-                    append(exercise.exerciseName.replace("|", " "))
-                    exercise.sets.forEach { set ->
+                    append(ex.exerciseName.replace("|", " "))
+                    ex.sets.forEach { set ->
                         append(";")
                         append(set.weight)
                         append(",")
@@ -285,87 +256,61 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
         val state = dao.getActiveWorkoutState(userId) ?: return
         val parts = state.payloadJson.split("||")
         if (parts.isEmpty()) return
-
-        val header = parts[0].split('|')
+        val header = parts[0].split("|")
         val startedAt = header.getOrNull(0)?.toLongOrNull() ?: state.startedAt
         val timerLeft = header.getOrNull(1)?.toIntOrNull() ?: 0
         val running = header.getOrNull(2)?.toBoolean() ?: false
-
         val exercises = parts.drop(1).mapNotNull { block ->
             val exParts = block.split(";")
             val exId = exParts.getOrNull(0)?.toLongOrNull() ?: return@mapNotNull null
             val exName = exParts.getOrNull(1) ?: return@mapNotNull null
-            val sets = exParts.drop(2)
-                .map { raw ->
-                    val setParts = raw.split(",")
-                    ExerciseSetInput(
-                        weight = setParts.getOrNull(0) ?: "",
-                        reps = setParts.getOrNull(1) ?: ""
-                    )
-                }
-                .ifEmpty { listOf(ExerciseSetInput()) }
-
-            WorkoutExerciseInput(
-                exerciseId = exId,
-                exerciseName = exName,
-                sets = sets
-            )
+            val sets = exParts.drop(2).map { setRaw ->
+                val setParts = setRaw.split(",")
+                ExerciseSetInput(setParts.getOrNull(0) ?: "", setParts.getOrNull(1) ?: "")
+            }.ifEmpty { listOf(ExerciseSetInput()) }
+            WorkoutExerciseInput(exerciseId = exId, exerciseName = exName, sets = sets)
         }
-
-        _activeWorkout.value = ActiveWorkoutUiState(
-            startedAt = startedAt,
-            exercises = exercises,
-            restTimerSecondsLeft = timerLeft,
-            timerRunning = running
-        )
+        _activeWorkout.value = ActiveWorkoutUiState(startedAt, exercises, timerLeft, running)
     }
 
     private suspend fun seedBaseCatalogIfNeeded() {
         if (dao.countBaseExercises(userId) > 0) return
-
-        defaultBaseExercises.forEach { seed ->
+        defaultBaseExercises.forEach { (name, muscles, aliases, equipment) ->
             dao.upsertExercise(
                 ExerciseEntity(
                     userId = userId,
-                    name = seed.name,
-                    aliases = seed.aliases,
-                    muscles = seed.muscles,
-                    equipment = seed.equipment,
+                    name = name,
+                    aliases = aliases,
+                    muscles = muscles,
+                    equipment = equipment,
                     isBase = true
                 )
             )
         }
     }
 
-    private fun toExerciseCatalogItem(entity: ExerciseEntity) = ExerciseCatalogItem(
-        id = entity.id,
-        name = entity.name,
-        aliases = entity.aliases ?: "",
-        muscles = entity.muscles.split(',').map { it.trim() }.filter { it.isNotBlank() },
-        equipment = entity.equipment,
-        favorite = entity.isFavorite,
-        photoUri = entity.photoUri,
-        isBase = entity.isBase,
-        lastUsedAt = entity.lastUsedAt
-    )
-
-    private data class BaseExerciseSeed(
-        val name: String,
-        val muscles: String,
-        val aliases: String,
-        val equipment: String?
+    private fun ExerciseEntity.toUi() = ExerciseCatalogItem(
+        id = id,
+        name = name,
+        aliases = aliases ?: "",
+        muscles = muscles.split(",").map { it.trim() }.filter { it.isNotBlank() },
+        equipment = equipment,
+        favorite = isFavorite,
+        photoUri = photoUri,
+        isBase = isBase,
+        lastUsedAt = lastUsedAt
     )
 
     companion object {
         private val defaultBaseExercises = listOf(
-            BaseExerciseSeed("Жим лёжа", "Грудь,Трицепс", "bench press", "Штанга"),
-            BaseExerciseSeed("Приседания со штангой", "Квадрицепс,Ягодицы", "back squat", "Штанга"),
-            BaseExerciseSeed("Становая тяга", "Спина,Ягодицы", "deadlift", "Штанга"),
-            BaseExerciseSeed("Подтягивания", "Спина,Бицепс", "pull up", "Турник"),
-            BaseExerciseSeed("Жим гантелей сидя", "Плечи,Трицепс", "dumbbell shoulder press", "Гантели"),
-            BaseExerciseSeed("Тяга горизонтального блока", "Спина", "seated row", "Тренажёр"),
-            BaseExerciseSeed("Выпады", "Квадрицепс,Ягодицы", "lunges", "Гантели"),
-            BaseExerciseSeed("Планка", "Пресс", "plank", null)
+            listOf("Жим лёжа", "Грудь,Трицепс", "bench press", "Штанга"),
+            listOf("Приседания со штангой", "Квадрицепс,Ягодицы", "back squat", "Штанга"),
+            listOf("Становая тяга", "Спина,Ягодицы", "deadlift", "Штанга"),
+            listOf("Подтягивания", "Спина,Бицепс", "pull up", "Турник"),
+            listOf("Жим гантелей сидя", "Плечи,Трицепс", "dumbbell shoulder press", "Гантели"),
+            listOf("Тяга горизонтального блока", "Спина", "seated row", "Тренажёр"),
+            listOf("Выпады", "Квадрицепс,Ягодицы", "lunges", "Гантели"),
+            listOf("Планка", "Пресс", "plank", null)
         )
     }
 }
