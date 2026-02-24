@@ -68,7 +68,9 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.workouttracker.R
-import com.example.workouttracker.ui.components.SectionHeader
+import com.example.workouttracker.data.settings.AppSettingsDataStore
+import com.example.workouttracker.ui.designsystem.AppTopBar
+import com.example.workouttracker.ui.designsystem.MetricCard
 import com.example.workouttracker.ui.nutrition.NutritionEntry
 import com.example.workouttracker.ui.training.ExerciseEntry
 import com.example.workouttracker.viewmodel.AuthViewModel
@@ -109,6 +111,7 @@ import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
+import com.example.workouttracker.workers.StepServiceWatchdogWorker
 
 /* ===================== Weather DTO & API ===================== */
 data class WeatherResponse(val main: Main, val weather: List<WeatherDesc>)
@@ -270,16 +273,14 @@ fun AnalyticsScreen(
         hasStepPermission = granted
         prefs.edit().putBoolean("step_permission", granted).apply()
         if (granted) {
-            val serviceIntent = Intent(context, StepCounterService::class.java)
-            ContextCompat.startForegroundService(context, serviceIntent)
+            startStepCounterServiceSafely(context, reason = "permission_granted")
         }
     }
 
 // 🔥 ВАЖНО: автостарт сервиса, если разрешение уже есть
     LaunchedEffect(hasStepPermission) {
         if (hasStepPermission) {
-            val serviceIntent = Intent(context, StepCounterService::class.java)
-            ContextCompat.startForegroundService(context, serviceIntent)
+            startStepCounterServiceSafely(context, reason = "permission_granted")
         }
     }
 
@@ -615,9 +616,8 @@ fun AnalyticsScreen(
     /* ===================== UI ===================== */
     Scaffold(
         topBar = {
-            SectionHeader(
+            AppTopBar(
                 title = "Аналитика",
-                titleStyle = MaterialTheme.typography.headlineSmall,
                 actions = {
                     IconButton(onClick = { showSettings = true }) {
                         Icon(Icons.Default.Tune, contentDescription = "Настройки аналитики")
@@ -634,6 +634,9 @@ fun AnalyticsScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            item {
+                MetricCard(title = "Шагов сегодня", value = stepsToday.toString())
+            }
             item {
                 StepsCardPretty(
                     steps = stepsToday,
@@ -703,6 +706,14 @@ fun AnalyticsScreen(
                     .remove(K_LAST_GOAL_NOTIFIED)
                     .putString(K_LAST_NOTIFY_DAY, todayKeyIso())
                     .apply()
+
+                scope.launch {
+                    AppSettingsDataStore(context).updateFromLegacyPreferences(
+                        theme = context.getSharedPreferences("settings", Context.MODE_PRIVATE).getString("theme_variant", "DARK") ?: "DARK",
+                        notificationsEnabled = notify,
+                        stepGoal = g
+                    )
+                }
 
                 city = c
                 stepGoal = g
@@ -825,6 +836,8 @@ class StepCounterService : Service() {
             sensorManager.registerListener(stepDetectorListener, stepDetector, SensorManager.SENSOR_DELAY_NORMAL)
         }
 
+        prefs.edit().putLong(DIAG_LAST_SERVICE_START_TS, System.currentTimeMillis()).apply()
+
         // Start foreground with notification
         ensureServiceChannel()
         val initialSteps = prefs.getLong("steps_today", 0L)
@@ -842,6 +855,11 @@ class StepCounterService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val reason = intent?.getStringExtra(EXTRA_START_REASON) ?: "unknown"
+        prefs.edit()
+            .putLong(DIAG_LAST_SERVICE_START_TS, System.currentTimeMillis())
+            .putString(DIAG_LAST_NON_START_REASON, "started:$reason")
+            .apply()
         return START_STICKY
     }
 
@@ -892,6 +910,8 @@ class StepCounterService : Service() {
                 .putLong("steps_last_raw", raw)
                 .putLong("steps_last_ts", now)
                 .putLong("steps_last_sensor_ts", event.timestamp)
+                .putLong(DIAG_LAST_SENSOR_EVENT_TS, now)
+                .putLong(DIAG_LAST_SENSOR_EVENT_UPTIME_NS, event.timestamp)
                 .apply()
 
             // Broadcast update to UI
@@ -935,6 +955,8 @@ class StepCounterService : Service() {
                 .putLong("steps_today", todaySteps)
                 .putString("steps_today_date", today)
                 .putLong("steps_last_ts", now)
+                .putLong(DIAG_LAST_SENSOR_EVENT_TS, now)
+                .putLong(DIAG_LAST_SENSOR_EVENT_UPTIME_NS, event.timestamp)
                 .apply()
 
             val intent = Intent(ACTION_STEPS_UPDATED).setPackage(this@StepCounterService.packageName)
@@ -1070,13 +1092,11 @@ class MidnightResetReceiver : BroadcastReceiver() {
 /* ===================== Boot Receiver ===================== */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
-        if (intent?.action == Intent.ACTION_BOOT_COMPLETED) {
-            val prefs = userAnalyticsPrefs(context)
-            if (prefs.getBoolean("step_permission", false)) {
-                val serviceIntent = Intent(context, StepCounterService::class.java)
-                ContextCompat.startForegroundService(context, serviceIntent)
-            }
+        val action = intent?.action ?: return
+        if (action == Intent.ACTION_BOOT_COMPLETED || action == Intent.ACTION_MY_PACKAGE_REPLACED) {
+            startStepCounterServiceSafely(context, reason = action)
             MidnightResetReceiver.scheduleNext(context)
+            StepServiceWatchdogWorker.schedule(context)
         }
     }
 }

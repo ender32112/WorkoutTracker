@@ -2,6 +2,7 @@ package com.example.workouttracker
 
 import android.content.Context
 import android.os.Bundle
+import androidx.lifecycle.lifecycleScope
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
@@ -11,14 +12,18 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.compose.rememberNavController
+import com.example.workouttracker.data.settings.AppSettingsDataStore
 import com.example.workouttracker.ui.navigation.WorkoutNavGraph
 import com.example.workouttracker.ui.theme.ThemeVariant
 import com.example.workouttracker.ui.theme.WorkoutTrackerTheme
+import com.example.workouttracker.workers.StepServiceWatchdogWorker
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        StepServiceWatchdogWorker.schedule(this)
         setContent {
             val context = LocalContext.current
 
@@ -26,6 +31,7 @@ class MainActivity : ComponentActivity() {
             val prefs = remember {
                 context.getSharedPreferences("settings", Context.MODE_PRIVATE)
             }
+            val settingsStore = remember { AppSettingsDataStore(context) }
 
             // Текущее состояние темы — читаем из preferences
             var themeVariant by remember {
@@ -51,6 +57,7 @@ class MainActivity : ComponentActivity() {
                 themeVariant = next
                 // сохраняем выбор
                 prefs.edit().putString("theme_variant", next.name).apply()
+                lifecycleScope.launch { settingsStore.setThemeVariant(next.name) }
             }
 
             WorkoutTrackerTheme(variant = themeVariant) {
