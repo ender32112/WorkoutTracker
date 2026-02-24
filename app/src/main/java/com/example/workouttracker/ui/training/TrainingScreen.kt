@@ -1,6 +1,5 @@
 package com.example.workouttracker.ui.training
 
-import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -44,8 +43,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.workouttracker.ui.components.SectionHeader
 import com.example.workouttracker.viewmodel.TrainingViewModel
-import java.io.File
-import java.io.FileOutputStream
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -242,7 +239,7 @@ private fun AddExerciseDialog(
     var aliases by remember { mutableStateOf("") }
     var favorite by remember { mutableStateOf(false) }
     var photoUri by remember { mutableStateOf<String?>(null) }
-    val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+    val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: android.net.Uri? ->
         photoUri = uri?.let { persistImageToInternal(context, it) }
     }
 
@@ -265,15 +262,3 @@ private fun AddExerciseDialog(
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
     )
 }
-
-private fun persistImageToInternal(context: android.content.Context, source: Uri): String? = try {
-    val dir = File(context.filesDir, "exercise_photos").apply { mkdirs() }
-    val file = File(dir, "ex_${System.currentTimeMillis()}.jpg")
-    context.contentResolver.openInputStream(source)?.use { input ->
-        FileOutputStream(file).use { output -> input.copyTo(output) }
-    }
-    file.absolutePath
-} catch (_: Exception) {
-    null
-}
-
