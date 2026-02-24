@@ -42,7 +42,7 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
     private var timerJob: Job? = null
 
     val allExercises: StateFlow<List<ExerciseCatalogItem>> = dao.observeExercises(userId)
-        .map { list -> list.map { it.toUi() } }
+        .map { list -> list.map(::exerciseEntityToUi) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val quickAddExercises: StateFlow<List<ExerciseCatalogItem>> = combine(
@@ -55,15 +55,15 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
             val musclePass = muscle.isNullOrBlank() || ex.muscles.contains(muscle, true)
             queryPass && musclePass
         }.sortedWith(compareByDescending<ExerciseEntity> { it.isFavorite }.thenByDescending { it.lastUsedAt ?: 0L }.thenBy { it.name })
-            .map { it.toUi() }
+            .map(::exerciseEntityToUi)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val favorites: StateFlow<List<ExerciseCatalogItem>> = dao.observeFavorites(userId)
-        .map { it.map(ExerciseEntity::toUi) }
+        .map { it.map(::exerciseEntityToUi) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val recentExercises: StateFlow<List<ExerciseCatalogItem>> = dao.observeRecentExercises(userId)
-        .map { it.map(ExerciseEntity::toUi) }
+        .map { it.map(::exerciseEntityToUi) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
 
@@ -289,28 +289,35 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    private fun ExerciseEntity.toUi() = ExerciseCatalogItem(
-        id = id,
-        name = name,
-        aliases = aliases ?: "",
-        muscles = muscles.split(",").map { it.trim() }.filter { it.isNotBlank() },
-        equipment = equipment,
-        favorite = isFavorite,
-        photoUri = photoUri,
-        isBase = isBase,
-        lastUsedAt = lastUsedAt
+    private fun exerciseEntityToUi(entity: ExerciseEntity) = ExerciseCatalogItem(
+        id = entity.id,
+        name = entity.name,
+        aliases = entity.aliases ?: "",
+        muscles = entity.muscles.split(",").map { it.trim() }.filter { it.isNotBlank() },
+        equipment = entity.equipment,
+        favorite = entity.isFavorite,
+        photoUri = entity.photoUri,
+        isBase = entity.isBase,
+        lastUsedAt = entity.lastUsedAt
     )
 
     companion object {
         private val defaultBaseExercises = listOf(
-            listOf("Жим лёжа", "Грудь,Трицепс", "bench press", "Штанга"),
-            listOf("Приседания со штангой", "Квадрицепс,Ягодицы", "back squat", "Штанга"),
-            listOf("Становая тяга", "Спина,Ягодицы", "deadlift", "Штанга"),
-            listOf("Подтягивания", "Спина,Бицепс", "pull up", "Турник"),
-            listOf("Жим гантелей сидя", "Плечи,Трицепс", "dumbbell shoulder press", "Гантели"),
-            listOf("Тяга горизонтального блока", "Спина", "seated row", "Тренажёр"),
-            listOf("Выпады", "Квадрицепс,Ягодицы", "lunges", "Гантели"),
-            listOf("Планка", "Пресс", "plank", null)
+            BaseExerciseSeed("Жим лёжа", "Грудь,Трицепс", "bench press", "Штанга"),
+            BaseExerciseSeed("Приседания со штангой", "Квадрицепс,Ягодицы", "back squat", "Штанга"),
+            BaseExerciseSeed("Становая тяга", "Спина,Ягодицы", "deadlift", "Штанга"),
+            BaseExerciseSeed("Подтягивания", "Спина,Бицепс", "pull up", "Турник"),
+            BaseExerciseSeed("Жим гантелей сидя", "Плечи,Трицепс", "dumbbell shoulder press", "Гантели"),
+            BaseExerciseSeed("Тяга горизонтального блока", "Спина", "seated row", "Тренажёр"),
+            BaseExerciseSeed("Выпады", "Квадрицепс,Ягодицы", "lunges", "Гантели"),
+            BaseExerciseSeed("Планка", "Пресс", "plank", null)
+        )
+
+        private data class BaseExerciseSeed(
+            val name: String,
+            val muscles: String,
+            val aliases: String?,
+            val equipment: String?
         )
     }
 }
