@@ -67,9 +67,11 @@ fun NutritionAnalyticsFullScreen(
         topBar = {
             SectionHeader(
                 title = "Аналитика питания",
-                subtitle = "КБЖУ дня и выполнение плана",
                 titleStyle = MaterialTheme.typography.headlineSmall,
                 showDivider = false,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(60.dp),
                 actions = {
                     IconButton(onClick = onClose) {
                         Icon(Icons.Filled.Close, contentDescription = "Закрыть аналитику")
@@ -121,36 +123,31 @@ private fun AnalyticsRefreshRow(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Row(
+        FilledTonalButton(
+            onClick = onRefreshToday,
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
+            shape = RoundedCornerShape(12.dp)
         ) {
-            FilledTonalButton(
-                onClick = onRefreshToday,
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Icon(Icons.Filled.Refresh, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Пересчитать день")
-            }
-            FilledTonalButton(
-                onClick = onRefreshWeekly,
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Icon(Icons.Filled.Refresh, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Пересчитать неделю")
-            }
+            Icon(Icons.Filled.Refresh, contentDescription = null)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Пересчитать день")
         }
+
+        FilledTonalButton(
+            onClick = onRefreshWeekly,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Icon(Icons.Filled.Refresh, contentDescription = null)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Пересчитать неделю")
+        }
+
         ElevatedButton(
             onClick = onShowRatings,
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(12.dp),
-            enabled = ratingsAvailable,
-            colors = ButtonDefaults.elevatedButtonColors()
+            enabled = ratingsAvailable
         ) {
             Icon(Icons.Filled.QueryStats, contentDescription = null)
             Spacer(modifier = Modifier.width(8.dp))
@@ -158,6 +155,7 @@ private fun AnalyticsRefreshRow(
         }
     }
 }
+
 
 @Composable
 private fun FoodRatingsCard(

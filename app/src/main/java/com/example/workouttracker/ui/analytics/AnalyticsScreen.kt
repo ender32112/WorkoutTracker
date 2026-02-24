@@ -138,7 +138,7 @@ private const val ACTION_STEPS_UPDATED = "com.example.workouttracker.STEPS_UPDAT
 private const val PREF_KEY_STEPS_HISTORY = "steps_history"
 private const val MAX_STEPS_HISTORY = 30
 
-private fun userAnalyticsPrefs(context: Context): SharedPreferences {
+fun userAnalyticsPrefs(context: Context): SharedPreferences {
     val authPrefs = context.getSharedPreferences(AuthViewModel.AUTH_PREFS_NAME, Context.MODE_PRIVATE)
     val userId = authPrefs.getString(AuthViewModel.KEY_CURRENT_USER_ID, null) ?: "guest"
     return context.getSharedPreferences("analytics_prefs_" + userId, Context.MODE_PRIVATE)
