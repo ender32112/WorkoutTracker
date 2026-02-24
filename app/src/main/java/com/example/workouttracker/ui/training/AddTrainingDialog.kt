@@ -1,6 +1,12 @@
 package com.example.workouttracker.ui.training
 
 import android.app.DatePickerDialog
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
+import android.net.Uri
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -40,6 +46,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import java.io.File
+import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -227,7 +235,7 @@ fun AddTrainingDialog(
                     // Лаунчер выбора фото (используем заранее захваченный context!)
                     val pickPhoto = rememberLauncherForActivityResult(
                         contract = ActivityResultContracts.PickVisualMedia()
-                    ) { uri ->
+                    ) { uri: Uri? ->
                         editPhotoUri = uri?.let { persistImageToInternal(context, it) } ?: editPhotoUri
                     }
 
@@ -417,3 +425,33 @@ fun AddTrainingDialog(
 
 fun formatDateForDisplay(date: String): String =
     date.replace(Regex("(\\d{4})-(\\d{2})-(\\d{2})"), "$3.$2.$1")
+
+fun persistImageToInternal(context: Context, source: Uri): String? = try {
+    val dir = File(context.filesDir, "exercise_photos").apply { mkdirs() }
+    val file = File(dir, "ex_${System.currentTimeMillis()}.jpg")
+    context.contentResolver.openInputStream(source)?.use { input ->
+        FileOutputStream(file).use { output -> input.copyTo(output) }
+    }
+    file.absolutePath
+} catch (_: Exception) {
+    null
+}
+
+fun loadBitmapFlexible(context: Context, pathOrUri: String?): Bitmap? {
+    if (pathOrUri.isNullOrBlank()) return null
+    return try {
+        if (pathOrUri.startsWith("/")) {
+            BitmapFactory.decodeFile(pathOrUri)
+        } else {
+            val uri = Uri.parse(pathOrUri)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val source = ImageDecoder.createSource(context.contentResolver, uri)
+                ImageDecoder.decodeBitmap(source)
+            } else {
+                context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+            }
+        }
+    } catch (_: Exception) {
+        null
+    }
+}
