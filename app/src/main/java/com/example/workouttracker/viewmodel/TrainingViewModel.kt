@@ -3,168 +3,314 @@ package com.example.workouttracker.viewmodel
 import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.example.workouttracker.data.local.ActiveWorkoutStateEntity
+import com.example.workouttracker.data.local.ExerciseEntity
+import com.example.workouttracker.data.local.PerformedExerciseDraft
+import com.example.workouttracker.data.local.PerformedSetDraft
+import com.example.workouttracker.data.local.UserEntity
+import com.example.workouttracker.data.local.WorkoutTrackerDatabase
+import com.example.workouttracker.ui.training.ActiveWorkoutUiState
 import com.example.workouttracker.ui.training.ExerciseCatalogItem
-import com.example.workouttracker.ui.training.ExerciseEntry
+import com.example.workouttracker.ui.training.ExercisePrUi
+import com.example.workouttracker.ui.training.ExerciseSetInput
+import com.example.workouttracker.ui.training.WeeklyVolumeUi
 import com.example.workouttracker.ui.training.TrainingSession
+import com.example.workouttracker.ui.training.WorkoutExerciseInput
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import org.json.JSONArray
-import org.json.JSONObject
-import java.util.UUID
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 class TrainingViewModel(application: Application) : AndroidViewModel(application) {
     private val authPrefs = application.getSharedPreferences(AuthViewModel.AUTH_PREFS_NAME, Context.MODE_PRIVATE)
     private val userId = authPrefs.getString(AuthViewModel.KEY_CURRENT_USER_ID, null) ?: "guest"
-    private val prefs = application.getSharedPreferences("training_prefs_" + userId, Context.MODE_PRIVATE)
 
-    private val _sessions = MutableStateFlow<List<TrainingSession>>(emptyList())
-    val sessions: StateFlow<List<TrainingSession>> = _sessions
+    private val dao = WorkoutTrackerDatabase.getInstance(application).dao()
 
-    // Каталог упражнений
-    private val _exerciseCatalog = MutableStateFlow<List<ExerciseCatalogItem>>(emptyList())
-    val exerciseCatalog: StateFlow<List<ExerciseCatalogItem>> = _exerciseCatalog
+    private val searchQuery = MutableStateFlow("")
+    private val muscleFilter = MutableStateFlow<String?>(null)
+
+    private val _activeWorkout = MutableStateFlow<ActiveWorkoutUiState?>(null)
+    val activeWorkout: StateFlow<ActiveWorkoutUiState?> = _activeWorkout
+
+    private var timerJob: Job? = null
+
+    val allExercises: StateFlow<List<ExerciseCatalogItem>> = dao.observeExercises(userId)
+        .map { list -> list.map { it.toUi() } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val quickAddExercises: StateFlow<List<ExerciseCatalogItem>> = combine(
+        searchQuery,
+        muscleFilter,
+        dao.observeExercises(userId)
+    ) { query, muscle, all ->
+        all.filter { ex ->
+            val queryPass = query.isBlank() || ex.name.contains(query, true) || (ex.aliases ?: "").contains(query, true)
+            val musclePass = muscle.isNullOrBlank() || ex.muscles.contains(muscle, true)
+            queryPass && musclePass
+        }.sortedWith(compareByDescending<ExerciseEntity> { it.isFavorite }.thenByDescending { it.lastUsedAt ?: 0L }.thenBy { it.name })
+            .map { it.toUi() }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val favorites: StateFlow<List<ExerciseCatalogItem>> = dao.observeFavorites(userId)
+        .map { it.map(ExerciseEntity::toUi) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val recentExercises: StateFlow<List<ExerciseCatalogItem>> = dao.observeRecentExercises(userId)
+        .map { it.map(ExerciseEntity::toUi) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+
+    val sessions: StateFlow<List<TrainingSession>> = dao.observePerformedSessions(userId)
+        .map { list -> list.map { TrainingSession(date = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date(it.startedAt)), exercises = emptyList()) } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val exercisePr: StateFlow<List<ExercisePrUi>> = dao.observeExercisePr(userId)
+        .map { rows -> rows.map { ExercisePrUi(it.exerciseName, it.bestVolumeSet, it.bestE1rm) } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val weeklyVolume: StateFlow<List<WeeklyVolumeUi>> = dao.observeWeeklyVolume(userId)
+        .map { rows -> rows.map { WeeklyVolumeUi(it.weekKey, it.volume) } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
-        loadSessions()
-        loadExerciseCatalog()
-        if (_exerciseCatalog.value.isEmpty()) seedDefaultCatalog()
-    }
-
-    // -------- Тренировки --------
-    private fun loadSessions() {
-        val jsonString = prefs.getString("sessions", null) ?: return
-        val jsonArray = JSONArray(jsonString)
-        val list = mutableListOf<TrainingSession>()
-
-        for (i in 0 until jsonArray.length()) {
-            val obj = jsonArray.getJSONObject(i)
-            val exercises = mutableListOf<ExerciseEntry>()
-            val exArray = obj.getJSONArray("exercises")
-            for (j in 0 until exArray.length()) {
-                val ex = exArray.getJSONObject(j)
-                exercises.add(
-                    ExerciseEntry(
-                        // id не сериализовался раньше — создадим новый (обратная совместимость)
-                        name = ex.getString("name"),
-                        sets = ex.getInt("sets"),
-                        reps = ex.getInt("reps"),
-                        weight = ex.getDouble("weight").toFloat(),
-                        photoUri = if (ex.has("photoUri") && !ex.isNull("photoUri")) ex.getString("photoUri") else null
-                    )
-                )
-            }
-            list.add(
-                TrainingSession(
-                    id = UUID.fromString(obj.getString("id")),
-                    date = obj.getString("date"),
-                    exercises = exercises
-                )
-            )
+        viewModelScope.launch {
+            dao.upsertUser(UserEntity(id = userId, name = "Local user", email = "$userId@local"))
+            seedBaseCatalogIfNeeded()
+            restoreActiveWorkout()
         }
-        _sessions.value = list
     }
 
-    private fun saveSessions() {
-        val jsonArray = JSONArray()
-        _sessions.value.forEach { session ->
-            val obj = JSONObject().apply {
-                put("id", session.id.toString())
-                put("date", session.date)
-                val exArray = JSONArray()
-                session.exercises.forEach { ex ->
-                    exArray.put(
-                        JSONObject().apply {
-                            // id упражнения в сессии можно не писать — не критичен для восстановления,
-                            // но если хочешь — можно сохранить:
-                            // put("id", ex.id.toString())
-                            put("name", ex.name)
-                            put("sets", ex.sets)
-                            put("reps", ex.reps)
-                            put("weight", ex.weight)
-                            put("photoUri", ex.photoUri)
-                        }
-                    )
-                }
-                put("exercises", exArray)
-            }
-            jsonArray.put(obj)
-        }
-        prefs.edit().putString("sessions", jsonArray.toString()).apply()
-    }
+    fun setSearchQuery(query: String) { searchQuery.value = query }
+    fun setMuscleFilter(muscle: String?) { muscleFilter.value = muscle }
 
-    fun addSession(session: TrainingSession) {
-        _sessions.value = _sessions.value + session
-        saveSessions()
-    }
-
-    fun removeSession(id: String) {
-        _sessions.value = _sessions.value.filterNot { it.id.toString() == id }
-        saveSessions()
-    }
-
-    fun updateSession(updated: TrainingSession) {
-        _sessions.value = _sessions.value.map { if (it.id == updated.id) updated else it }
-        saveSessions()
-    }
-
-    // -------- Каталог упражнений --------
-    private fun loadExerciseCatalog() {
-        val json = prefs.getString("exercise_catalog", null) ?: return
-        val arr = JSONArray(json)
-        val items = mutableListOf<ExerciseCatalogItem>()
-        for (i in 0 until arr.length()) {
-            val o = arr.getJSONObject(i)
-            items.add(
-                ExerciseCatalogItem(
-                    id = UUID.fromString(o.getString("id")),
-                    name = o.getString("name"),
-                    photoUri = if (o.has("photoUri") && !o.isNull("photoUri")) o.getString("photoUri") else null
+    fun addOrUpdateExercise(
+        id: Long? = null,
+        name: String,
+        muscles: List<String>,
+        equipment: String?,
+        aliases: String,
+        favorite: Boolean,
+        photoUri: String?
+    ) {
+        viewModelScope.launch {
+            val safe = name.trim()
+            if (safe.isBlank()) return@launch
+            dao.upsertExercise(
+                ExerciseEntity(
+                    id = id ?: 0,
+                    userId = userId,
+                    name = safe,
+                    aliases = aliases.trim().ifBlank { null },
+                    muscles = muscles.joinToString(","),
+                    equipment = equipment?.trim()?.ifBlank { null },
+                    isFavorite = favorite,
+                    photoUri = photoUri,
+                    isBase = false
                 )
             )
         }
-        _exerciseCatalog.value = items
     }
 
-    private fun saveExerciseCatalog() {
-        val arr = JSONArray()
-        _exerciseCatalog.value.forEach { item ->
-            arr.put(
-                JSONObject().apply {
-                    put("id", item.id.toString())
-                    put("name", item.name)
-                    put("photoUri", item.photoUri)
-                }
+    fun deleteExercise(id: Long) {
+        viewModelScope.launch { dao.deleteCustomExercise(userId, id) }
+    }
+
+    fun toggleFavorite(id: Long, value: Boolean) {
+        viewModelScope.launch { dao.updateFavorite(userId, id, value) }
+    }
+
+    fun startWorkout() {
+        _activeWorkout.value = ActiveWorkoutUiState(startedAt = System.currentTimeMillis())
+        persistActiveWorkout()
+    }
+
+    fun addExerciseToActiveWorkout(exercise: ExerciseCatalogItem) {
+        val current = _activeWorkout.value ?: ActiveWorkoutUiState(startedAt = System.currentTimeMillis())
+        _activeWorkout.value = current.copy(
+            exercises = current.exercises + WorkoutExerciseInput(
+                exerciseId = exercise.id,
+                exerciseName = exercise.name
             )
-        }
-        prefs.edit().putString("exercise_catalog", arr.toString()).apply()
-    }
-
-    private fun seedDefaultCatalog() {
-        _exerciseCatalog.value = listOf(
-            ExerciseCatalogItem(name = "Жим штанги лежа"),
-            ExerciseCatalogItem(name = "Присед"),
-            ExerciseCatalogItem(name = "Становая тяга"),
-            ExerciseCatalogItem(name = "Тяга верхнего блока"),
-            ExerciseCatalogItem(name = "Подтягивания"),
-            ExerciseCatalogItem(name = "Отжимания"),
-            ExerciseCatalogItem(name = "Жим гантелей"),
-            ExerciseCatalogItem(name = "Выпады")
         )
-        saveExerciseCatalog()
+        persistActiveWorkout()
     }
 
-    fun addCatalogItem(name: String, photoUri: String?) {
-        _exerciseCatalog.value = _exerciseCatalog.value + ExerciseCatalogItem(name = name, photoUri = photoUri)
-        saveExerciseCatalog()
+    fun addSet(exerciseId: Long) {
+        mutateExercise(exerciseId) { it.copy(sets = it.sets + ExerciseSetInput()) }
     }
 
-    fun updateCatalogItem(updated: ExerciseCatalogItem) {
-        _exerciseCatalog.value = _exerciseCatalog.value.map { if (it.id == updated.id) updated else it }
-        saveExerciseCatalog()
+    fun removeSet(exerciseId: Long, setIndex: Int) {
+        mutateExercise(exerciseId) {
+            if (it.sets.size <= 1) it else it.copy(sets = it.sets.filterIndexed { i, _ -> i != setIndex })
+        }
     }
 
-    fun removeCatalogItem(id: UUID) {
-        _exerciseCatalog.value = _exerciseCatalog.value.filterNot { it.id == id }
-        saveExerciseCatalog()
+    fun updateSet(exerciseId: Long, setIndex: Int, weight: String? = null, reps: String? = null) {
+        mutateExercise(exerciseId) { ex ->
+            ex.copy(sets = ex.sets.mapIndexed { idx, set ->
+                if (idx != setIndex) set else set.copy(
+                    weight = weight ?: set.weight,
+                    reps = reps ?: set.reps
+                )
+            })
+        }
+    }
+
+    fun startRestTimer(seconds: Int = 90) {
+        timerJob?.cancel()
+        val current = _activeWorkout.value ?: return
+        _activeWorkout.value = current.copy(restTimerSecondsLeft = seconds, timerRunning = true)
+        timerJob = viewModelScope.launch {
+            var left = seconds
+            while (left > 0) {
+                delay(1000)
+                left -= 1
+                _activeWorkout.value = _activeWorkout.value?.copy(restTimerSecondsLeft = left, timerRunning = left > 0)
+            }
+            persistActiveWorkout()
+        }
+    }
+
+    fun skipRestTimer() {
+        timerJob?.cancel()
+        _activeWorkout.value = _activeWorkout.value?.copy(restTimerSecondsLeft = 0, timerRunning = false)
+    }
+
+    fun restartRestTimer(seconds: Int = 90) = startRestTimer(seconds)
+
+    fun finishWorkout() {
+        val active = _activeWorkout.value ?: return
+        viewModelScope.launch {
+            val performed = active.exercises.mapNotNull { ex ->
+                val sets = ex.sets.mapNotNull {
+                    val w = it.weight.toFloatOrNull()
+                    val r = it.reps.toIntOrNull()
+                    if (w == null || r == null) null else PerformedSetDraft(w, r)
+                }
+                if (sets.isEmpty()) null else PerformedExerciseDraft(ex.exerciseId, ex.exerciseName, sets)
+            }
+            if (performed.isNotEmpty()) {
+                dao.persistWorkoutPerformed(
+                    userId = userId,
+                    startedAt = active.startedAt,
+                    finishedAt = System.currentTimeMillis(),
+                    exercises = performed
+                )
+            } else {
+                dao.clearActiveWorkoutState(userId)
+            }
+            _activeWorkout.value = null
+            timerJob?.cancel()
+        }
+    }
+
+    private fun mutateExercise(exerciseId: Long, mapper: (WorkoutExerciseInput) -> WorkoutExerciseInput) {
+        val current = _activeWorkout.value ?: return
+        _activeWorkout.value = current.copy(
+            exercises = current.exercises.map { if (it.exerciseId == exerciseId) mapper(it) else it }
+        )
+        persistActiveWorkout()
+    }
+
+    private fun persistActiveWorkout() {
+        val active = _activeWorkout.value ?: return
+        viewModelScope.launch {
+            val payload = buildString {
+                append(active.startedAt)
+                append("|")
+                append(active.restTimerSecondsLeft)
+                append("|")
+                append(active.timerRunning)
+                active.exercises.forEach { ex ->
+                    append("||")
+                    append(ex.exerciseId)
+                    append(";")
+                    append(ex.exerciseName.replace("|", " "))
+                    ex.sets.forEach { set ->
+                        append(";")
+                        append(set.weight)
+                        append(",")
+                        append(set.reps)
+                    }
+                }
+            }
+            dao.upsertActiveWorkoutState(
+                ActiveWorkoutStateEntity(
+                    userId = userId,
+                    startedAt = active.startedAt,
+                    updatedAt = System.currentTimeMillis(),
+                    payloadJson = payload
+                )
+            )
+        }
+    }
+
+    private suspend fun restoreActiveWorkout() {
+        val state = dao.getActiveWorkoutState(userId) ?: return
+        val parts = state.payloadJson.split("||")
+        if (parts.isEmpty()) return
+        val header = parts[0].split("|")
+        val startedAt = header.getOrNull(0)?.toLongOrNull() ?: state.startedAt
+        val timerLeft = header.getOrNull(1)?.toIntOrNull() ?: 0
+        val running = header.getOrNull(2)?.toBoolean() ?: false
+        val exercises = parts.drop(1).mapNotNull { block ->
+            val exParts = block.split(";")
+            val exId = exParts.getOrNull(0)?.toLongOrNull() ?: return@mapNotNull null
+            val exName = exParts.getOrNull(1) ?: return@mapNotNull null
+            val sets = exParts.drop(2).map { setRaw ->
+                val setParts = setRaw.split(",")
+                ExerciseSetInput(setParts.getOrNull(0) ?: "", setParts.getOrNull(1) ?: "")
+            }.ifEmpty { listOf(ExerciseSetInput()) }
+            WorkoutExerciseInput(exerciseId = exId, exerciseName = exName, sets = sets)
+        }
+        _activeWorkout.value = ActiveWorkoutUiState(startedAt, exercises, timerLeft, running)
+    }
+
+    private suspend fun seedBaseCatalogIfNeeded() {
+        if (dao.countBaseExercises(userId) > 0) return
+        defaultBaseExercises.forEach { (name, muscles, aliases, equipment) ->
+            dao.upsertExercise(
+                ExerciseEntity(
+                    userId = userId,
+                    name = name,
+                    aliases = aliases,
+                    muscles = muscles,
+                    equipment = equipment,
+                    isBase = true
+                )
+            )
+        }
+    }
+
+    private fun ExerciseEntity.toUi() = ExerciseCatalogItem(
+        id = id,
+        name = name,
+        aliases = aliases ?: "",
+        muscles = muscles.split(",").map { it.trim() }.filter { it.isNotBlank() },
+        equipment = equipment,
+        favorite = isFavorite,
+        photoUri = photoUri,
+        isBase = isBase,
+        lastUsedAt = lastUsedAt
+    )
+
+    companion object {
+        private val defaultBaseExercises = listOf(
+            listOf("Жим лёжа", "Грудь,Трицепс", "bench press", "Штанга"),
+            listOf("Приседания со штангой", "Квадрицепс,Ягодицы", "back squat", "Штанга"),
+            listOf("Становая тяга", "Спина,Ягодицы", "deadlift", "Штанга"),
+            listOf("Подтягивания", "Спина,Бицепс", "pull up", "Турник"),
+            listOf("Жим гантелей сидя", "Плечи,Трицепс", "dumbbell shoulder press", "Гантели"),
+            listOf("Тяга горизонтального блока", "Спина", "seated row", "Тренажёр"),
+            listOf("Выпады", "Квадрицепс,Ягодицы", "lunges", "Гантели"),
+            listOf("Планка", "Пресс", "plank", null)
+        )
     }
 }

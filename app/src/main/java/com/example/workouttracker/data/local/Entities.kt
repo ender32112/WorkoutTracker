@@ -48,20 +48,27 @@ data class StepEntryEntity(
 )
 
 @Entity(
-    tableName = "exercises",
+    tableName = "exercise_catalog",
     foreignKeys = [ForeignKey(
         entity = UserEntity::class,
         parentColumns = ["id"],
         childColumns = ["userId"],
         onDelete = ForeignKey.CASCADE
     )],
-    indices = [Index("userId")]
+    indices = [Index("userId"), Index("isBase"), Index("isFavorite")]
 )
 data class ExerciseEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val userId: String,
     val name: String,
-    val description: String? = null
+    val aliases: String? = null,
+    val muscles: String,
+    val equipment: String? = null,
+    val isFavorite: Boolean = false,
+    val photoUri: String? = null,
+    val isBase: Boolean = false,
+    val lastUsedAt: Long? = null,
+    val createdAt: Long = System.currentTimeMillis()
 )
 
 @Entity(
@@ -82,7 +89,7 @@ data class WorkoutTemplateEntity(
 )
 
 @Entity(
-    tableName = "workout_sessions",
+    tableName = "workout_session_performed",
     foreignKeys = [ForeignKey(
         entity = UserEntity::class,
         parentColumns = ["id"],
@@ -91,11 +98,62 @@ data class WorkoutTemplateEntity(
     )],
     indices = [Index("userId")]
 )
-data class WorkoutSessionEntity(
+data class WorkoutSessionPerformedEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val userId: String,
-    val templateId: Long? = null,
-    val startedAt: Long = System.currentTimeMillis(),
-    val finishedAt: Long? = null,
+    val startedAt: Long,
+    val finishedAt: Long,
     val notes: String? = null
+)
+
+@Entity(
+    tableName = "workout_performed_exercise",
+    foreignKeys = [ForeignKey(
+        entity = WorkoutSessionPerformedEntity::class,
+        parentColumns = ["id"],
+        childColumns = ["sessionId"],
+        onDelete = ForeignKey.CASCADE
+    )],
+    indices = [Index("sessionId"), Index("exerciseId")]
+)
+data class WorkoutPerformedExerciseEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val sessionId: Long,
+    val exerciseId: Long,
+    val exerciseNameSnapshot: String
+)
+
+@Entity(
+    tableName = "workout_set_performed",
+    foreignKeys = [ForeignKey(
+        entity = WorkoutPerformedExerciseEntity::class,
+        parentColumns = ["id"],
+        childColumns = ["performedExerciseId"],
+        onDelete = ForeignKey.CASCADE
+    )],
+    indices = [Index("performedExerciseId")]
+)
+data class WorkoutSetPerformedEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val performedExerciseId: Long,
+    val setOrder: Int,
+    val weight: Float,
+    val reps: Int
+)
+
+@Entity(
+    tableName = "active_workout_state",
+    foreignKeys = [ForeignKey(
+        entity = UserEntity::class,
+        parentColumns = ["id"],
+        childColumns = ["userId"],
+        onDelete = ForeignKey.CASCADE
+    )],
+    indices = [Index("userId")]
+)
+data class ActiveWorkoutStateEntity(
+    @PrimaryKey val userId: String,
+    val startedAt: Long,
+    val updatedAt: Long,
+    val payloadJson: String
 )

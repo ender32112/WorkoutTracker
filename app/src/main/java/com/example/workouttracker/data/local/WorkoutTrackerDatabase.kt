@@ -12,9 +12,12 @@ import androidx.room.RoomDatabase
         StepEntryEntity::class,
         ExerciseEntity::class,
         WorkoutTemplateEntity::class,
-        WorkoutSessionEntity::class
+        WorkoutSessionPerformedEntity::class,
+        WorkoutPerformedExerciseEntity::class,
+        WorkoutSetPerformedEntity::class,
+        ActiveWorkoutStateEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class WorkoutTrackerDatabase : RoomDatabase() {
@@ -29,7 +32,8 @@ abstract class WorkoutTrackerDatabase : RoomDatabase() {
                     context.applicationContext,
                     WorkoutTrackerDatabase::class.java,
                     "workout_tracker.db"
-                ).build().also { INSTANCE = it }
+                ).fallbackToDestructiveMigration()
+                    .build().also { INSTANCE = it }
             }
         }
     }
