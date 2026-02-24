@@ -16,8 +16,9 @@ data class TrainingSession(
     val date: String,
     val exercises: List<ExerciseEntry>
 ) {
-    val totalVolume: Int
-        get() = exercises.sumOf { it.sets * it.reps * it.weight.toInt() }
+    // Исправлено: учитываем дробную часть веса, чтобы объём не терял точность.
+    val totalVolume: Double
+        get() = exercises.sumOf { it.sets * it.reps * it.weight.toDouble() }
 }
 
 data class ExerciseCatalogItem(

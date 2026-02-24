@@ -17,6 +17,7 @@ import com.example.workouttracker.ui.training.ExerciseSetInput
 import com.example.workouttracker.ui.training.WeeklyVolumeUi
 import com.example.workouttracker.ui.training.TrainingSession
 import com.example.workouttracker.ui.training.WorkoutExerciseInput
+import com.google.gson.Gson
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,6 +41,7 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
     val activeWorkout: StateFlow<ActiveWorkoutUiState?> = _activeWorkout
 
     private var timerJob: Job? = null
+    private val gson = Gson()
 
     val allExercises: StateFlow<List<ExerciseCatalogItem>> = dao.observeExercises(userId)
         .map { list -> list.map(::exerciseEntityToUi) }
@@ -167,20 +169,23 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
         timerJob?.cancel()
         val current = _activeWorkout.value ?: return
         _activeWorkout.value = current.copy(restTimerSecondsLeft = seconds, timerRunning = true)
+        persistActiveWorkout()
+        // Для полной фоновой устойчивости рекомендую интеграцию с WorkManager / foreground service — задача для следующего этапа.
         timerJob = viewModelScope.launch {
             var left = seconds
             while (left > 0) {
                 delay(1000)
                 left -= 1
                 _activeWorkout.value = _activeWorkout.value?.copy(restTimerSecondsLeft = left, timerRunning = left > 0)
+                persistActiveWorkout()
             }
-            persistActiveWorkout()
         }
     }
 
     fun skipRestTimer() {
         timerJob?.cancel()
         _activeWorkout.value = _activeWorkout.value?.copy(restTimerSecondsLeft = 0, timerRunning = false)
+        persistActiveWorkout()
     }
 
     fun restartRestTimer(seconds: Int = 90) = startRestTimer(seconds)
@@ -222,31 +227,14 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
     private fun persistActiveWorkout() {
         val active = _activeWorkout.value ?: return
         viewModelScope.launch {
-            val payload = buildString {
-                append(active.startedAt)
-                append("|")
-                append(active.restTimerSecondsLeft)
-                append("|")
-                append(active.timerRunning)
-                active.exercises.forEach { ex ->
-                    append("||")
-                    append(ex.exerciseId)
-                    append(";")
-                    append(ex.exerciseName.replace("|", " "))
-                    ex.sets.forEach { set ->
-                        append(";")
-                        append(set.weight)
-                        append(",")
-                        append(set.reps)
-                    }
-                }
-            }
+            // Перешли на JSON для читаемости и устойчивости к изменениям формата состояния.
+            val payloadJson = gson.toJson(active)
             dao.upsertActiveWorkoutState(
                 ActiveWorkoutStateEntity(
                     userId = userId,
                     startedAt = active.startedAt,
                     updatedAt = System.currentTimeMillis(),
-                    payloadJson = payload
+                    payloadJson = payloadJson
                 )
             )
         }
@@ -254,23 +242,13 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
 
     private suspend fun restoreActiveWorkout() {
         val state = dao.getActiveWorkoutState(userId) ?: return
-        val parts = state.payloadJson.split("||")
-        if (parts.isEmpty()) return
-        val header = parts[0].split("|")
-        val startedAt = header.getOrNull(0)?.toLongOrNull() ?: state.startedAt
-        val timerLeft = header.getOrNull(1)?.toIntOrNull() ?: 0
-        val running = header.getOrNull(2)?.toBoolean() ?: false
-        val exercises = parts.drop(1).mapNotNull { block ->
-            val exParts = block.split(";")
-            val exId = exParts.getOrNull(0)?.toLongOrNull() ?: return@mapNotNull null
-            val exName = exParts.getOrNull(1) ?: return@mapNotNull null
-            val sets = exParts.drop(2).map { setRaw ->
-                val setParts = setRaw.split(",")
-                ExerciseSetInput(setParts.getOrNull(0) ?: "", setParts.getOrNull(1) ?: "")
-            }.ifEmpty { listOf(ExerciseSetInput()) }
-            WorkoutExerciseInput(exerciseId = exId, exerciseName = exName, sets = sets)
+        try {
+            val active = gson.fromJson(state.payloadJson, ActiveWorkoutUiState::class.java)
+            val startedAt = active?.startedAt ?: state.startedAt
+            _activeWorkout.value = active?.copy(startedAt = startedAt)
+        } catch (_: Exception) {
+            _activeWorkout.value = null
         }
-        _activeWorkout.value = ActiveWorkoutUiState(startedAt, exercises, timerLeft, running)
     }
 
     private suspend fun seedBaseCatalogIfNeeded() {
