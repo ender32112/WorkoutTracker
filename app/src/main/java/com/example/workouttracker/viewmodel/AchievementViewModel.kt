@@ -26,7 +26,9 @@ class AchievementViewModel(
         ) { sessions, articles, balance ->
             // агрегаты
             val totalWorkouts = sessions.size
-            val totalReps = sessions.sumOf { it.exercises.sumOf { ex -> ex.sets * ex.reps } }
+            val totalReps = sessions.sumOf { session ->
+                session.exercises.sumOf { ex -> ex.sets.sumOf { it.reps } }
+            }
             val totalVolume = sessions.sumOf { it.totalVolume }.roundToInt()
             val purchasedArticles = articles.count { it.purchased }
             val (currentStreak, bestStreak) = computeStreak(sessions.map { it.date })
