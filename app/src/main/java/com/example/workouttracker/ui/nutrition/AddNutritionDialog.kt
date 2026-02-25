@@ -644,10 +644,10 @@ fun AddNutritionDialog(
             properties = DialogProperties(usePlatformDefaultWidth = false)
         ) {
             BarcodeScannerScreen(
+                viewModel = viewModel,
                 onDetected = { barcode ->
                     isLookupLoading = true
                     showScanner = false
-                    viewModel.lookupBarcode(barcode)
                 },
                 onClose = { showScanner = false }
             )
