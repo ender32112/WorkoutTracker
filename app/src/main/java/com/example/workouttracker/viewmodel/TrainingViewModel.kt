@@ -7,25 +7,16 @@ import androidx.lifecycle.viewModelScope
 import com.example.workouttracker.data.local.ActiveWorkoutStateEntity
 import com.example.workouttracker.data.local.ExerciseEntity
 import com.example.workouttracker.data.local.PerformedExerciseDraft
-import com.example.workouttracker.data.local.PerformedSessionWithExercises
 import com.example.workouttracker.data.local.PerformedSetDraft
-import com.example.workouttracker.data.local.TemplateExerciseWithDetails
 import com.example.workouttracker.data.local.UserEntity
-import com.example.workouttracker.data.local.WorkoutTemplateEntity
-import com.example.workouttracker.data.local.WorkoutTemplateExerciseEntity
-import com.example.workouttracker.data.local.WorkoutTemplateWithExercises
 import com.example.workouttracker.data.local.WorkoutTrackerDatabase
 import com.example.workouttracker.ui.training.ActiveWorkoutUiState
 import com.example.workouttracker.ui.training.ExerciseCatalogItem
-import com.example.workouttracker.ui.training.ExerciseEntry
 import com.example.workouttracker.ui.training.ExercisePrUi
 import com.example.workouttracker.ui.training.ExerciseSetInput
-import com.example.workouttracker.ui.training.ExerciseSetSummary
-import com.example.workouttracker.ui.training.TrainingSession
 import com.example.workouttracker.ui.training.WeeklyVolumeUi
+import com.example.workouttracker.ui.training.TrainingSession
 import com.example.workouttracker.ui.training.WorkoutExerciseInput
-import com.example.workouttracker.ui.training.WorkoutTemplateExerciseUi
-import com.example.workouttracker.ui.training.WorkoutTemplateUi
 import com.google.gson.Gson
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -33,13 +24,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 class TrainingViewModel(application: Application) : AndroidViewModel(application) {
     private val authPrefs = application.getSharedPreferences(AuthViewModel.AUTH_PREFS_NAME, Context.MODE_PRIVATE)
@@ -81,25 +68,13 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
         .map { it.map(::exerciseEntityToUi) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val exercisePr: StateFlow<List<ExercisePrUi>> = dao.observeExercisePr(userId)
-        .map { rows -> rows.map { ExercisePrUi(it.exerciseName, it.bestVolumeSet, it.bestE1rm) } }
+
+    val sessions: StateFlow<List<TrainingSession>> = dao.observePerformedSessions(userId)
+        .map { list -> list.map { TrainingSession(date = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date(it.startedAt)), exercises = emptyList()) } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val exercisePrMap: StateFlow<Map<String, ExercisePrUi>> = exercisePr
-        .map { list -> list.associateBy { it.exerciseName } }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
-
-    val sessions: StateFlow<List<TrainingSession>> = combine(
-        dao.observePerformedSessionsWithExercises(userId),
-        dao.observeExercises(userId),
-        exercisePrMap
-    ) { list, catalog, prMap ->
-        val catalogById = catalog.associateBy { it.id }
-        list.map { mapPerformedSessionToUi(it, catalogById, prMap) }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val templates: StateFlow<List<WorkoutTemplateUi>> = dao.observeWorkoutTemplatesWithExercises(userId)
-        .map { list -> list.map(::templateToUi) }
+    val exercisePr: StateFlow<List<ExercisePrUi>> = dao.observeExercisePr(userId)
+        .map { rows -> rows.map { ExercisePrUi(it.exerciseName, it.bestVolumeSet, it.bestE1rm) } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val weeklyVolume: StateFlow<List<WeeklyVolumeUi>> = dao.observeWeeklyVolume(userId)
@@ -153,72 +128,6 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch { dao.updateFavorite(userId, id, value) }
     }
 
-    fun createTemplate(title: String) {
-        viewModelScope.launch {
-            if (title.isBlank()) return@launch
-            dao.upsertWorkoutTemplate(WorkoutTemplateEntity(userId = userId, title = title.trim()))
-        }
-    }
-
-    fun addExerciseToTemplate(templateId: Long, exerciseId: Long, defaultSets: Int, defaultReps: Int, order: Int) {
-        viewModelScope.launch {
-            dao.upsertWorkoutTemplateExercise(
-                WorkoutTemplateExerciseEntity(
-                    templateId = templateId,
-                    exerciseId = exerciseId,
-                    orderInTemplate = order,
-                    defaultSets = defaultSets,
-                    defaultReps = defaultReps
-                )
-            )
-        }
-    }
-
-    fun removeExerciseFromTemplate(entryId: Long) {
-        viewModelScope.launch { dao.deleteWorkoutTemplateExercise(entryId) }
-    }
-
-    fun startWorkoutFromTemplate(templateId: Long) {
-        viewModelScope.launch {
-            val template = dao.getWorkoutTemplateWithExercises(templateId) ?: return@launch
-            _activeWorkout.value = ActiveWorkoutUiState(
-                startedAt = System.currentTimeMillis(),
-                exercises = template.exercises
-                    .sortedBy { it.templateExercise.orderInTemplate }
-                    .map { detail ->
-                        WorkoutExerciseInput(
-                            exerciseId = detail.exercise.id,
-                            exerciseName = detail.exercise.name,
-                            sets = List(detail.templateExercise.defaultSets) {
-                                ExerciseSetInput(
-                                    weight = detail.templateExercise.defaultWeight?.toString().orEmpty(),
-                                    reps = detail.templateExercise.defaultReps.toString()
-                                )
-                            }
-                        )
-                    }
-            )
-            persistActiveWorkout()
-        }
-    }
-
-    fun repeatSession(sessionId: Long) {
-        val session = sessions.value.firstOrNull { it.sessionId == sessionId } ?: return
-        _activeWorkout.value = ActiveWorkoutUiState(
-            startedAt = System.currentTimeMillis(),
-            exercises = session.exercises.map { ex ->
-                WorkoutExerciseInput(
-                    exerciseId = ex.exerciseId,
-                    exerciseName = ex.name,
-                    sets = ex.sets.map { set -> ExerciseSetInput(weight = set.weight.toString(), reps = set.reps.toString()) }
-                )
-            }
-        )
-        persistActiveWorkout()
-    }
-
-    fun observeSessionDetail(sessionId: Long) = dao.observePerformedSessionDetail(sessionId)
-
     fun startWorkout() {
         _activeWorkout.value = ActiveWorkoutUiState(startedAt = System.currentTimeMillis())
         persistActiveWorkout()
@@ -261,6 +170,7 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
         val current = _activeWorkout.value ?: return
         _activeWorkout.value = current.copy(restTimerSecondsLeft = seconds, timerRunning = true)
         persistActiveWorkout()
+        // Для полной фоновой устойчивости рекомендую интеграцию с WorkManager / foreground service — задача для следующего этапа.
         timerJob = viewModelScope.launch {
             var left = seconds
             while (left > 0) {
@@ -317,6 +227,7 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
     private fun persistActiveWorkout() {
         val active = _activeWorkout.value ?: return
         viewModelScope.launch {
+            // Перешли на JSON для читаемости и устойчивости к изменениям формата состояния.
             val payloadJson = gson.toJson(active)
             dao.upsertActiveWorkoutState(
                 ActiveWorkoutStateEntity(
@@ -356,28 +267,6 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    private fun templateToUi(templateWithExercises: WorkoutTemplateWithExercises): WorkoutTemplateUi {
-        return WorkoutTemplateUi(
-            id = templateWithExercises.template.id,
-            title = templateWithExercises.template.title,
-            exercises = templateWithExercises.exercises
-                .sortedBy { it.templateExercise.orderInTemplate }
-                .map(::templateExerciseToUi)
-        )
-    }
-
-    private fun templateExerciseToUi(detail: TemplateExerciseWithDetails) = WorkoutTemplateExerciseUi(
-        id = detail.templateExercise.id,
-        exerciseId = detail.exercise.id,
-        name = detail.exercise.name,
-        muscles = detail.exercise.muscles.split(",").map { it.trim() }.filter { it.isNotBlank() },
-        photoUri = detail.exercise.photoUri,
-        orderInTemplate = detail.templateExercise.orderInTemplate,
-        defaultSets = detail.templateExercise.defaultSets,
-        defaultReps = detail.templateExercise.defaultReps,
-        defaultWeight = detail.templateExercise.defaultWeight
-    )
-
     private fun exerciseEntityToUi(entity: ExerciseEntity) = ExerciseCatalogItem(
         id = entity.id,
         name = entity.name,
@@ -391,34 +280,6 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
     )
 
     companion object {
-        fun mapPerformedSessionToUi(
-            session: PerformedSessionWithExercises,
-            catalogById: Map<Long, ExerciseEntity>,
-            prMap: Map<String, ExercisePrUi>
-        ): TrainingSession {
-            val format = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
-            val exercises = session.exercises.map { performedExercise ->
-                val catalogExercise = catalogById[performedExercise.exerciseEntity.exerciseId]
-                val name = catalogExercise?.name ?: performedExercise.exerciseEntity.exerciseNameSnapshot
-                ExerciseEntry(
-                    exerciseId = performedExercise.exerciseEntity.exerciseId,
-                    name = name,
-                    muscles = catalogExercise?.muscles?.split(",")?.map { it.trim() }?.filter { it.isNotBlank() } ?: emptyList(),
-                    sets = performedExercise.sets.sortedBy { it.setOrder }
-                        .map { ExerciseSetSummary(order = it.setOrder + 1, weight = it.weight, reps = it.reps) },
-                    photoUri = catalogExercise?.photoUri,
-                    pr = prMap[name]
-                )
-            }
-            return TrainingSession(
-                sessionId = session.session.id,
-                startedAt = session.session.startedAt,
-                finishedAt = session.session.finishedAt,
-                date = format.format(Date(session.session.startedAt)),
-                exercises = exercises
-            )
-        }
-
         private val defaultBaseExercises = listOf(
             BaseExerciseSeed("Жим лёжа", "Грудь,Трицепс", "bench press", "Штанга"),
             BaseExerciseSeed("Приседания со штангой", "Квадрицепс,Ягодицы", "back squat", "Штанга"),
