@@ -1,11 +1,9 @@
 package com.example.workouttracker.data.local
 
 import androidx.room.Dao
-import androidx.room.Embedded
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
-import androidx.room.Relation
 import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
@@ -63,20 +61,6 @@ interface WorkoutTrackerDao {
     suspend fun upsertWorkoutTemplate(entry: WorkoutTemplateEntity)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsertWorkoutTemplateExercise(entry: WorkoutTemplateExerciseEntity)
-
-    @Query("DELETE FROM workout_template_exercise WHERE id = :entryId")
-    suspend fun deleteWorkoutTemplateExercise(entryId: Long)
-
-    @Transaction
-    @Query("SELECT * FROM workout_templates WHERE userId = :userId ORDER BY title ASC")
-    fun observeWorkoutTemplatesWithExercises(userId: String): Flow<List<WorkoutTemplateWithExercises>>
-
-    @Transaction
-    @Query("SELECT * FROM workout_templates WHERE id = :templateId")
-    suspend fun getWorkoutTemplateWithExercises(templateId: Long): WorkoutTemplateWithExercises?
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertWorkoutSession(entry: WorkoutSessionPerformedEntity): Long
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -87,14 +71,6 @@ interface WorkoutTrackerDao {
 
     @Query("SELECT * FROM workout_session_performed WHERE userId = :userId ORDER BY startedAt DESC")
     fun observePerformedSessions(userId: String): Flow<List<WorkoutSessionPerformedEntity>>
-
-    @Transaction
-    @Query("SELECT * FROM workout_session_performed WHERE userId = :userId ORDER BY startedAt DESC")
-    fun observePerformedSessionsWithExercises(userId: String): Flow<List<PerformedSessionWithExercises>>
-
-    @Transaction
-    @Query("SELECT * FROM workout_session_performed WHERE id = :sessionId")
-    fun observePerformedSessionDetail(sessionId: Long): Flow<PerformedSessionWithExercises?>
 
     @Query(
         """
@@ -178,38 +154,6 @@ interface WorkoutTrackerDao {
         clearActiveWorkoutState(userId)
     }
 }
-
-data class WorkoutPerformedExerciseWithSets(
-    @Embedded val exerciseEntity: WorkoutPerformedExerciseEntity,
-    @Relation(parentColumn = "id", entityColumn = "performedExerciseId")
-    val sets: List<WorkoutSetPerformedEntity>
-)
-
-data class PerformedSessionWithExercises(
-    @Embedded val session: WorkoutSessionPerformedEntity,
-    @Relation(
-        parentColumn = "id",
-        entityColumn = "sessionId",
-        entity = WorkoutPerformedExerciseEntity::class
-    )
-    val exercises: List<WorkoutPerformedExerciseWithSets>
-)
-
-data class TemplateExerciseWithDetails(
-    @Embedded val templateExercise: WorkoutTemplateExerciseEntity,
-    @Relation(parentColumn = "exerciseId", entityColumn = "id")
-    val exercise: ExerciseEntity
-)
-
-data class WorkoutTemplateWithExercises(
-    @Embedded val template: WorkoutTemplateEntity,
-    @Relation(
-        parentColumn = "id",
-        entityColumn = "templateId",
-        entity = WorkoutTemplateExerciseEntity::class
-    )
-    val exercises: List<TemplateExerciseWithDetails>
-)
 
 data class ExercisePrRow(
     val exerciseName: String,
