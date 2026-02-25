@@ -99,6 +99,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     private val _lookupProduct = MutableStateFlow<ProductLookupResult?>(null)
     val lookupProduct = _lookupProduct.asStateFlow()
 
+    private val _lookupError = MutableStateFlow<String?>(null)
+    val lookupError = _lookupError.asStateFlow()
+
     var dailyNorm = mapOf<String, Int>()
 
     data class DailyNutritionSummary(
@@ -485,12 +488,20 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun lookupBarcode(code: String) {
         viewModelScope.launch {
-            _lookupProduct.value = productRepository.lookupByBarcode(code)
+            _lookupError.value = null
+            _lookupProduct.value = null
+            val result = productRepository.lookupByBarcode(code)
+            if (result != null) {
+                _lookupProduct.value = result
+            } else {
+                _lookupError.value = "Продукт не найден в кэше и Open Food Facts"
+            }
         }
     }
 
     fun clearLookupProduct() {
         _lookupProduct.value = null
+        _lookupError.value = null
     }
 
     fun addScannedProductToDiary(

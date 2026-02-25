@@ -1,6 +1,10 @@
 package com.example.workouttracker.ui.nutrition
 
 import android.app.DatePickerDialog
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,6 +18,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CardDefaults
@@ -22,6 +27,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -34,6 +40,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -42,6 +49,10 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.core.content.ContextCompat
+import com.example.workouttracker.viewmodel.NutritionViewModel
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.UUID
@@ -60,11 +71,29 @@ data class DishIngredientUi(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddNutritionDialog(
+    viewModel: NutritionViewModel,
     entry: NutritionEntry? = null,
     onConfirm: (NutritionEntry) -> Unit,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val lookupProduct by viewModel.lookupProduct.collectAsState()
+    val lookupError by viewModel.lookupError.collectAsState()
+
+    var showScanner by remember { mutableStateOf(false) }
+    var showCameraDeniedHint by remember { mutableStateOf(false) }
+    var isLookupLoading by remember { mutableStateOf(false) }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            showCameraDeniedHint = false
+            showScanner = true
+        } else {
+            showCameraDeniedHint = true
+        }
+    }
 
     var date by remember(entry?.date) {
         mutableStateOf(entry?.date ?: SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(java.util.Date()))
@@ -96,6 +125,13 @@ fun AddNutritionDialog(
         }
         if (ingredients.isEmpty()) {
             ingredients.add(DishIngredientUi())
+        }
+    }
+
+
+    LaunchedEffect(lookupProduct, lookupError) {
+        if (lookupProduct != null || lookupError != null) {
+            isLookupLoading = false
         }
     }
 
@@ -199,6 +235,45 @@ fun AddNutritionDialog(
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
+                }
+
+                item {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Button(
+                            onClick = {
+                                val hasPermission = ContextCompat.checkSelfPermission(
+                                    context,
+                                    Manifest.permission.CAMERA
+                                ) == PackageManager.PERMISSION_GRANTED
+                                if (hasPermission) {
+                                    showCameraDeniedHint = false
+                                    showScanner = true
+                                } else {
+                                    cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                                }
+                            }
+                        ) {
+                            Icon(Icons.Filled.QrCodeScanner, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Сканировать штрихкод")
+                        }
+
+                        if (isLookupLoading) {
+                            CircularProgressIndicator(modifier = Modifier.padding(top = 8.dp))
+                        }
+                    }
+
+                    if (showCameraDeniedHint) {
+                        Text(
+                            text = "Для сканирования нужен доступ к камере. Разрешите его в системном диалоге или настройках приложения.",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(top = 6.dp)
+                        )
+                    }
                 }
 
                 item {
@@ -562,6 +637,120 @@ fun AddNutritionDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
     )
+
+    if (showScanner) {
+        Dialog(
+            onDismissRequest = { showScanner = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            BarcodeScannerScreen(
+                onDetected = { barcode ->
+                    isLookupLoading = true
+                    showScanner = false
+                    viewModel.lookupBarcode(barcode)
+                },
+                onClose = { showScanner = false }
+            )
+        }
+    }
+
+
+    lookupError?.let { message ->
+        AlertDialog(
+            onDismissRequest = { viewModel.clearLookupProduct() },
+            title = { Text("Не удалось получить данные") },
+            text = { Text(message) },
+            confirmButton = {
+                TextButton(onClick = { viewModel.clearLookupProduct() }) {
+                    Text("Ок")
+                }
+            }
+        )
+    }
+
+    lookupProduct?.let { product ->
+        var gramsForDiary by remember(product.barcode) { mutableStateOf("100") }
+        var fridgeAmount by remember(product.barcode) { mutableStateOf("1") }
+        var fridgeUnit by remember(product.barcode) { mutableStateOf(QuantityUnit.GRAMS) }
+
+        AlertDialog(
+            onDismissRequest = { viewModel.clearLookupProduct() },
+            title = { Text("Найден продукт") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(product.name, style = MaterialTheme.typography.titleMedium)
+                    Text("Штрихкод: ${product.barcode}")
+                    Text("На 100 г: ${product.calories100} ккал, Б ${product.protein100} г, Ж ${product.fats100} г, У ${product.carbs100} г")
+
+                    OutlinedTextField(
+                        value = dishName,
+                        onValueChange = { dishName = it.take(40) },
+                        label = { Text("Название для автозаполнения") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+
+                    OutlinedTextField(
+                        value = gramsForDiary,
+                        onValueChange = { gramsForDiary = it.filter(Char::isDigit).take(4) },
+                        label = { Text("Граммы в дневник") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        OutlinedTextField(
+                            value = fridgeAmount,
+                            onValueChange = { fridgeAmount = it.filter(Char::isDigit).take(4) },
+                            label = { Text("Количество в холодильник") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
+                        )
+                        FilterChip(
+                            selected = fridgeUnit == QuantityUnit.GRAMS,
+                            onClick = { fridgeUnit = QuantityUnit.GRAMS },
+                            label = { Text("г") }
+                        )
+                        FilterChip(
+                            selected = fridgeUnit == QuantityUnit.PIECES,
+                            onClick = { fridgeUnit = QuantityUnit.PIECES },
+                            label = { Text("шт") }
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val grams = gramsForDiary.toIntOrNull()?.coerceAtLeast(1) ?: 100
+                    viewModel.addScannedProductToDiary(date, mealType, product, grams)
+                    dishName = product.name
+                    ingredients.clear()
+                    ingredients.add(
+                        DishIngredientUi(
+                            name = product.name,
+                            caloriesPer100g = product.calories100.toString(),
+                            proteinPer100g = product.protein100.toString(),
+                            fatsPer100g = product.fats100.toString(),
+                            carbsPer100g = product.carbs100.toString(),
+                            weightInDish = grams.toString()
+                        )
+                    )
+                    portionWeightStr = grams.toString()
+                    viewModel.clearLookupProduct()
+                }) { Text("Добавить в дневник") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    val amount = fridgeAmount.toIntOrNull()?.coerceAtLeast(1) ?: 1
+                    viewModel.addScannedProductToFridge(product, amount, fridgeUnit)
+                    viewModel.clearLookupProduct()
+                }) { Text("Добавить в холодильник") }
+            }
+        )
+    }
+
 }
 
 fun formatDateForDisplay(date: String): String =
