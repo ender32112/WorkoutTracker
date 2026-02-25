@@ -1,24 +1,32 @@
 package com.example.workouttracker.ui.training
 
-import java.util.UUID
-
 data class ExerciseEntry(
-    val id: UUID = UUID.randomUUID(),
+    val exerciseId: Long,
     val name: String,
-    val sets: Int,
-    val reps: Int,
+    val muscles: List<String> = emptyList(),
+    val sets: List<ExerciseSetSummary>,
+    val photoUri: String? = null,
+    val pr: ExercisePrUi? = null
+) {
+    val totalVolume: Double
+        get() = sets.sumOf { it.weight.toDouble() * it.reps.toDouble() }
+}
+
+data class ExerciseSetSummary(
+    val order: Int,
     val weight: Float,
-    val photoUri: String? = null
+    val reps: Int
 )
 
 data class TrainingSession(
-    val id: UUID = UUID.randomUUID(),
+    val sessionId: Long,
+    val startedAt: Long,
+    val finishedAt: Long,
     val date: String,
     val exercises: List<ExerciseEntry>
 ) {
-    // Исправлено: учитываем дробную часть веса, чтобы объём не терял точность.
     val totalVolume: Double
-        get() = exercises.sumOf { it.sets * it.reps * it.weight.toDouble() }
+        get() = exercises.sumOf { it.totalVolume }
 }
 
 data class ExerciseCatalogItem(
@@ -60,4 +68,22 @@ data class ExercisePrUi(
 data class WeeklyVolumeUi(
     val weekKey: String,
     val volume: Double
+)
+
+data class WorkoutTemplateExerciseUi(
+    val id: Long,
+    val exerciseId: Long,
+    val name: String,
+    val muscles: List<String>,
+    val photoUri: String?,
+    val orderInTemplate: Int,
+    val defaultSets: Int,
+    val defaultReps: Int,
+    val defaultWeight: Float?
+)
+
+data class WorkoutTemplateUi(
+    val id: Long,
+    val title: String,
+    val exercises: List<WorkoutTemplateExerciseUi>
 )

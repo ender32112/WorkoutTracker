@@ -89,6 +89,34 @@ data class WorkoutTemplateEntity(
 )
 
 @Entity(
+    tableName = "workout_template_exercise",
+    foreignKeys = [
+        ForeignKey(
+            entity = WorkoutTemplateEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["templateId"],
+            onDelete = ForeignKey.CASCADE
+        ),
+        ForeignKey(
+            entity = ExerciseEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["exerciseId"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ],
+    indices = [Index("templateId"), Index("exerciseId")]
+)
+data class WorkoutTemplateExerciseEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val templateId: Long,
+    val exerciseId: Long,
+    val orderInTemplate: Int,
+    val defaultSets: Int = 3,
+    val defaultReps: Int = 10,
+    val defaultWeight: Float? = null
+)
+
+@Entity(
     tableName = "workout_session_performed",
     foreignKeys = [ForeignKey(
         entity = UserEntity::class,
