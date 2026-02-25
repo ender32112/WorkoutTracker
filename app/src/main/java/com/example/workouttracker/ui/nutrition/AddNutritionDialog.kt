@@ -75,6 +75,8 @@ fun AddNutritionDialog(
 
     val ingredients = remember { mutableStateListOf<DishIngredientUi>() }
 
+    fun formatOneDecimal(value: Float): String = String.format(Locale.getDefault(), "%.1f", value)
+
     LaunchedEffect(entry?.id) {
         ingredients.clear()
         if (entry != null) {
@@ -83,10 +85,10 @@ fun AddNutritionDialog(
                     DishIngredientUi(
                         id = dishIngredient.id,
                         name = dishIngredient.ingredient.name,
-                        caloriesPer100g = dishIngredient.ingredient.caloriesPer100g.toString(),
-                        proteinPer100g = dishIngredient.ingredient.proteinPer100g.toString(),
-                        fatsPer100g = dishIngredient.ingredient.fatsPer100g.toString(),
-                        carbsPer100g = dishIngredient.ingredient.carbsPer100g.toString(),
+                        caloriesPer100g = formatOneDecimal(dishIngredient.ingredient.caloriesPer100g),
+                        proteinPer100g = formatOneDecimal(dishIngredient.ingredient.proteinPer100g),
+                        fatsPer100g = formatOneDecimal(dishIngredient.ingredient.fatsPer100g),
+                        carbsPer100g = formatOneDecimal(dishIngredient.ingredient.carbsPer100g),
                         weightInDish = dishIngredient.weightInDish.toString()
                     )
                 )
@@ -115,19 +117,37 @@ fun AddNutritionDialog(
 
     val totalWeightDish = ingredients.sumOf { it.weightInDish.toIntOrNull()?.takeIf { w -> w > 0 } ?: 0 }
 
-    fun parseMacro(value: String): Int {
-        val floatValue = value.replace(',', '.').toFloatOrNull() ?: 0f
-        return floatValue.roundToInt()
+    fun limitToOneDecimalInput(raw: String): String {
+        val filtered = raw.filter { it.isDigit() || it == '.' || it == ',' }
+        val separatorIndex = filtered.indexOfFirst { it == '.' || it == ',' }
+        val integerPart = if (separatorIndex == -1) filtered else filtered.substring(0, separatorIndex)
+        val decimalPart = if (separatorIndex == -1) "" else filtered.substring(separatorIndex + 1).filter { it.isDigit() }.take(1)
+        val separator = if (separatorIndex == -1 || (integerPart.isEmpty() && decimalPart.isEmpty())) "" else filtered[separatorIndex].toString()
+        val safeInteger = (integerPart.takeIf { it.isNotEmpty() } ?: if (separator.isNotEmpty()) "0" else "").take(4)
+
+        return buildString {
+            append(safeInteger)
+            if (separator.isNotEmpty()) {
+                append(separator)
+                append(decimalPart)
+            }
+        }
     }
 
-    fun weightedMacro(selector: (DishIngredientUi) -> Int): Int {
-        if (totalWeightDish == 0) return 0
+    fun parseMacro(value: String): Float {
+        val parsed = value.replace(',', '.').toFloatOrNull()?.coerceAtLeast(0f) ?: 0f
+        return ((parsed * 10f).roundToInt()) / 10f
+    }
+
+    fun weightedMacro(selector: (DishIngredientUi) -> Float): Float {
+        if (totalWeightDish == 0) return 0f
         val numerator = ingredients.sumOf { ingredient ->
             val weight = ingredient.weightInDish.toIntOrNull()?.takeIf { it > 0 } ?: 0
             val macro = selector(ingredient)
-            macro * weight
+            (macro * weight).toDouble()
         }
-        return numerator / totalWeightDish
+        val per100g = (numerator / totalWeightDish).toFloat()
+        return ((per100g * 10f).roundToInt()) / 10f
     }
 
     val dishCaloriesPer100g = weightedMacro { parseMacro(it.caloriesPer100g) }
@@ -135,10 +155,10 @@ fun AddNutritionDialog(
     val dishFatsPer100g = weightedMacro { parseMacro(it.fatsPer100g) }
     val dishCarbsPer100g = weightedMacro { parseMacro(it.carbsPer100g) }
 
-    val portionCalories = dishCaloriesPer100g * parsedPortionWeight / 100
-    val portionProtein = dishProteinPer100g * parsedPortionWeight / 100
-    val portionFats = dishFatsPer100g * parsedPortionWeight / 100
-    val portionCarbs = dishCarbsPer100g * parsedPortionWeight / 100
+    val portionCalories = (dishCaloriesPer100g * parsedPortionWeight / 100f).roundToInt()
+    val portionProtein = (dishProteinPer100g * parsedPortionWeight / 100f).roundToInt()
+    val portionFats = (dishFatsPer100g * parsedPortionWeight / 100f).roundToInt()
+    val portionCarbs = (dishCarbsPer100g * parsedPortionWeight / 100f).roundToInt()
 
     var showDatePicker by remember { mutableStateOf(false) }
     if (showDatePicker) {
@@ -264,7 +284,7 @@ fun AddNutritionDialog(
                                     value = ingredient.caloriesPer100g,
                                     onValueChange = { value ->
                                         ingredients[index] = ingredient.copy(
-                                            caloriesPer100g = value.filter { it.isDigit() || it == '.' || it == ',' }.take(6)
+                                            caloriesPer100g = limitToOneDecimalInput(value)
                                         )
                                         ingredientsError = null
                                     },
@@ -277,7 +297,7 @@ fun AddNutritionDialog(
                                     value = ingredient.proteinPer100g,
                                     onValueChange = { value ->
                                         ingredients[index] = ingredient.copy(
-                                            proteinPer100g = value.filter { it.isDigit() || it == '.' || it == ',' }.take(6)
+                                            proteinPer100g = limitToOneDecimalInput(value)
                                         )
                                         ingredientsError = null
                                     },
@@ -293,7 +313,7 @@ fun AddNutritionDialog(
                                     value = ingredient.fatsPer100g,
                                     onValueChange = { value ->
                                         ingredients[index] = ingredient.copy(
-                                            fatsPer100g = value.filter { it.isDigit() || it == '.' || it == ',' }.take(6)
+                                            fatsPer100g = limitToOneDecimalInput(value)
                                         )
                                         ingredientsError = null
                                     },
@@ -306,7 +326,7 @@ fun AddNutritionDialog(
                                     value = ingredient.carbsPer100g,
                                     onValueChange = { value ->
                                         ingredients[index] = ingredient.copy(
-                                            carbsPer100g = value.filter { it.isDigit() || it == '.' || it == ',' }.take(6)
+                                            carbsPer100g = limitToOneDecimalInput(value)
                                         )
                                         ingredientsError = null
                                     },
@@ -401,12 +421,12 @@ fun AddNutritionDialog(
                                 )
                             } else {
                                 Text(
-                                    text = "Калории: $dishCaloriesPer100g ккал",
+                                    text = "Калории: ${formatOneDecimal(dishCaloriesPer100g)} ккал",
                                     style = MaterialTheme.typography.bodyMedium
                                 )
                                 Spacer(Modifier.height(2.dp))
                                 Text(
-                                    text = "Б: $dishProteinPer100g г   Ж: $dishFatsPer100g г   У: $dishCarbsPer100g г",
+                                    text = "Б: ${formatOneDecimal(dishProteinPer100g)} г   Ж: ${formatOneDecimal(dishFatsPer100g)} г   У: ${formatOneDecimal(dishCarbsPer100g)} г",
                                     style = MaterialTheme.typography.bodyMedium
                                 )
                             }

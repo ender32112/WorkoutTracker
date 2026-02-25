@@ -2,6 +2,7 @@ package com.example.workouttracker.ui.nutrition
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -12,6 +13,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.QueryStats
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -27,10 +29,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.launch
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.workouttracker.viewmodel.NutritionViewModel
 import com.example.workouttracker.ui.components.SectionHeader
+import com.example.workouttracker.ui.nutrition_analytic.NutritionAnalyticsFullScreen
 import com.example.workouttracker.ui.nutrition.FridgeDialog
 import java.text.SimpleDateFormat
 import java.util.*
@@ -48,6 +53,9 @@ fun NutritionScreen(
     val profile by viewModel.profile.collectAsState()
     val planMessage by viewModel.planMessage.collectAsState()
     val fridgePrompt by viewModel.fridgeExtraPrompt.collectAsState()
+    val todayAnalytics by viewModel.todayAnalytics.collectAsState()
+    val weeklyAnalytics by viewModel.weeklyAnalytics.collectAsState()
+    val foodRatings by viewModel.foodRatings.collectAsState()
 
     var showAddDialog by remember { mutableStateOf(false) }
     var editEntry by remember { mutableStateOf<NutritionEntry?>(null) }
@@ -57,7 +65,9 @@ fun NutritionScreen(
     var replaceMealType by remember { mutableStateOf<MealType?>(null) }
     var replaceComment by remember { mutableStateOf("") }
     var showFridgeChoiceDialog by remember { mutableStateOf(false) }
+    var showRegenerateWarning by remember { mutableStateOf(false) }
     var showFridgeDialog by remember { mutableStateOf(false) }
+    var showAnalyticsScreen by remember { mutableStateOf(false) }
 
     val snackbarHost = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()                // ← добавили
@@ -100,6 +110,12 @@ fun NutritionScreen(
         }
     }
 
+    LaunchedEffect(showAnalyticsScreen) {
+        if (showAnalyticsScreen) {
+            viewModel.computeTodayAnalytics()
+            viewModel.computeWeeklyAnalytics()
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -109,6 +125,9 @@ fun NutritionScreen(
                 actions = {
                     IconButton(onClick = { showProfileDialog = true }) {
                         Icon(Icons.Filled.Person, contentDescription = "Профиль питания")
+                    }
+                    IconButton(onClick = { showAnalyticsScreen = true }) {
+                        Icon(Icons.Filled.QueryStats, contentDescription = "Аналитика питания")
                     }
                     IconButton(onClick = { showSettings = true }) {
                         Icon(Icons.Filled.Settings, contentDescription = "Настройки")
@@ -137,9 +156,9 @@ fun NutritionScreen(
                     isLoading = isPlanLoading,
                     error = planError,
                     onGenerateClick = {
-                        val planExists = viewModel.hasCachedPlanForDate(today)
+                        val planExists = mealPlan != null || viewModel.hasCachedPlanForDate(today)
                         if (planExists) {
-                            viewModel.setPlanError("План на сегодня уже создан")
+                            showRegenerateWarning = true
                         } else {
                             showFridgeChoiceDialog = true
                         }
@@ -209,7 +228,52 @@ fun NutritionScreen(
                     }
                 }
             }
+
         }
+    }
+
+    if (showAnalyticsScreen) {
+        Dialog(
+            onDismissRequest = { showAnalyticsScreen = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            BackHandler { showAnalyticsScreen = false }
+                NutritionAnalyticsFullScreen(
+                    todayTotal = todayTotal,
+                    norm = viewModel.dailyNorm,
+                    todayAnalytics = todayAnalytics,
+                    weeklyAnalytics = weeklyAnalytics,
+                    foodRatings = foodRatings,
+                    onRefreshToday = { viewModel.computeTodayAnalytics() },
+                    onRefreshWeekly = { viewModel.computeWeeklyAnalytics() },
+                    onClose = { showAnalyticsScreen = false }
+                )
+            }
+    }
+
+    if (showRegenerateWarning) {
+        AlertDialog(
+            onDismissRequest = { showRegenerateWarning = false },
+            title = { Text("Обновить план") },
+            text = { Text("Текущий план будет удалён. Продолжить генерацию заново?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showRegenerateWarning = false
+                        viewModel.resetTodayPlan()
+                        showFridgeChoiceDialog = true
+                    },
+                    enabled = !isPlanLoading
+                ) {
+                    Text("Продолжить")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRegenerateWarning = false }) {
+                    Text("Отмена")
+                }
+            }
+        )
     }
 
     if (showFridgeChoiceDialog) {

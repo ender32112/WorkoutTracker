@@ -29,7 +29,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.rememberAsyncImagePainter
-import com.example.workouttracker.ui.components.SectionHeader
+import com.example.workouttracker.ui.designsystem.AppTopBar
 import com.example.workouttracker.ui.theme.ThemeVariant
 import com.example.workouttracker.ui.theme.icon
 import com.example.workouttracker.ui.theme.displayName
@@ -100,9 +100,8 @@ fun ProfileScreen(
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            SectionHeader(
+            AppTopBar(
                 title = "Профиль",
-                titleStyle = MaterialTheme.typography.headlineSmall,
                 actions = {
                     // Смена темы
                     AssistChip(
