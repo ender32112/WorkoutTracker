@@ -603,9 +603,9 @@ fun AnalyticsScreen(
     val bestExercises = sessions
         .flatMap { it.exercises }
         .groupBy { it.name }
-        .mapValues { (_, list) -> list.maxByOrNull { it.weight * it.reps * max(1, it.sets) } ?: list.first() }
+        .mapValues { (_, list) -> list.maxByOrNull { it.totalVolume } ?: list.first() }
         .values
-        .sortedByDescending { it.weight * it.reps * max(1, it.sets) }
+        .sortedByDescending { it.totalVolume }
         .take(bestExercisesLimit)
 
     /* ---------- Dialogs state ---------- */
@@ -2645,7 +2645,12 @@ fun BestExercisesCardPretty(exercises: Collection<ExerciseEntry>) {
                             Spacer(Modifier.width(8.dp))
                             Column {
                                 Text(ex.name, style = MaterialTheme.typography.titleSmall)
-                                Text("${ex.weight} кг × ${ex.reps} × ${max(1, ex.sets)}", style = MaterialTheme.typography.bodySmall)
+                                val repsTotal = ex.sets.sumOf { it.reps }
+                                val maxWeight = ex.sets.maxOfOrNull { it.weight } ?: 0f
+                                Text(
+                                    "${maxWeight} кг • ${ex.sets.size} подходов • ${repsTotal} повторов",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
                             }
                         }
                     }

@@ -52,7 +52,6 @@ import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.util.UUID
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -119,7 +118,20 @@ fun AddTrainingBottomSheet(
                             return@Button
                         }
                         if (s !in 1..10 || r !in 1..100 || w !in 0f..1000f) return@Button
-                        exercises.add(ExerciseEntry(name = safeName, sets = s, reps = r, weight = w, photoUri = photoUri))
+                        exercises.add(
+                            ExerciseEntry(
+                                exerciseId = 0L,
+                                name = safeName,
+                                sets = List(s) { idx ->
+                                    ExerciseSetSummary(
+                                        order = idx + 1,
+                                        weight = w,
+                                        reps = r
+                                    )
+                                },
+                                photoUri = photoUri
+                            )
+                        )
                         name = ""
                         photoUri = null
                     }) { Text("Добавить") }
@@ -132,7 +144,12 @@ fun AddTrainingBottomSheet(
                     if (bitmap != null) {
                         Image(bitmap = bitmap.asImageBitmap(), contentDescription = null, modifier = Modifier.padding(end = 8.dp).height(40.dp).clip(CircleShape))
                     }
-                    Text("${exercise.name} • ${exercise.sets}x${exercise.reps} • ${exercise.weight}", modifier = Modifier.weight(1f))
+                    val firstSet = exercise.sets.firstOrNull()
+                    val setCount = exercise.sets.size
+                    Text(
+                        "${exercise.name} • ${setCount}x${firstSet?.reps ?: 0} • ${firstSet?.weight ?: 0f}",
+                        modifier = Modifier.weight(1f)
+                    )
                     IconButton(onClick = { exercises.removeAt(index) }) { Icon(Icons.Default.Delete, null) }
                 }
             }
@@ -142,7 +159,16 @@ fun AddTrainingBottomSheet(
                 Button(
                     onClick = {
                         if (exercises.isEmpty()) return@Button
-                        onSave(TrainingSession(id = session?.id ?: UUID.randomUUID(), date = date, exercises = exercises.toList()))
+                        val now = System.currentTimeMillis()
+                        onSave(
+                            TrainingSession(
+                                sessionId = session?.sessionId ?: 0L,
+                                startedAt = session?.startedAt ?: now,
+                                finishedAt = session?.finishedAt ?: now,
+                                date = date,
+                                exercises = exercises.toList()
+                            )
+                        )
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) { Text("Готово") }
