@@ -1,6 +1,7 @@
 package com.example.workouttracker.ui.training
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,8 +12,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -28,9 +31,11 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.rememberAsyncImagePainter
 
@@ -59,15 +64,21 @@ fun TrainingListScreen(
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.padding(top = 10.dp, bottom = 4.dp)
                 )
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = onOpenCatalog, modifier = Modifier.weight(1f)) { Text("Каталог") }
+                    TextButton(onClick = onOpenTemplates, modifier = Modifier.weight(1f)) { Text("Шаблоны") }
+                    TextButton(onClick = onOpenProgress, modifier = Modifier.weight(1f)) { Text("Аналитика") }
+                }
             }
 
             items(sessions, key = { it.sessionId }) { session ->
                 val expanded = expandedState[session.sessionId] ?: false
                 Card(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    shape = RoundedCornerShape(18.dp),
                     elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
                 ) {
-                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Column {
                                 Text(session.date, fontWeight = FontWeight.Bold)
@@ -79,24 +90,54 @@ fun TrainingListScreen(
                         }
                         if (expanded) {
                             session.exercises.forEach { exercise ->
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                                    if (exercise.photoUri != null) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.Top
+                                ) {
+                                    if (exercise.photoUri.isNullOrBlank()) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(46.dp)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(MaterialTheme.colorScheme.surface),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(Icons.Default.Image, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    } else {
                                         Image(
                                             painter = rememberAsyncImagePainter(exercise.photoUri),
                                             contentDescription = exercise.name,
-                                            modifier = Modifier.size(52.dp),
+                                            modifier = Modifier
+                                                .size(46.dp)
+                                                .clip(RoundedCornerShape(10.dp)),
                                             contentScale = ContentScale.Crop
                                         )
                                     }
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text(exercise.name, fontWeight = FontWeight.Medium)
+                                        Text(
+                                            exercise.name,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
                                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                            exercise.muscles.take(3).forEach { AssistChip(onClick = {}, label = { Text(it) }) }
+                                            exercise.muscles.take(3).forEach {
+                                                AssistChip(onClick = {}, label = { Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis) })
+                                            }
                                         }
-                                        Text(exercise.sets.joinToString(" • ") { "${it.order}) ${it.weight}кг × ${it.reps}" })
+                                        Text(
+                                            exercise.sets.joinToString(" • ") { "${it.order}) ${it.weight}кг × ${it.reps}" },
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
                                     }
                                     exercise.pr?.let {
-                                        Text("PR ${it.bestVolumeSet.toInt()}")
+                                        Text(
+                                            "PR ${it.bestVolumeSet.toInt()}",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            maxLines = 1
+                                        )
                                     }
                                 }
                             }
