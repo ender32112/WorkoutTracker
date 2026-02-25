@@ -149,28 +149,21 @@ fun ImprovedTrainingScreen(trainingViewModel: TrainingViewModel = viewModel()) {
 }
 
 @Composable
-private fun CatalogScreen(items: List<ExerciseCatalogItem>) {
+private fun CatalogScreen(
+    items: List<ExerciseCatalogItem>,
+    onQuickAdd: (ExerciseCatalogItem) -> Unit,
+    onStartWorkout: () -> Unit
+) {
     var query by remember { mutableStateOf("") }
-    var selectedMuscle by remember { mutableStateOf<String?>(null) }
-    var selectedEquipment by remember { mutableStateOf<String?>(null) }
-
-    val muscleFilters = remember(items) { items.flatMap { it.muscles }.distinct().sorted().take(10) }
-    val equipmentFilters = remember(items) { items.mapNotNull { it.equipment }.distinct().sorted().take(8) }
-
-    val filtered = remember(items, query, selectedMuscle, selectedEquipment) {
+    val filtered = remember(items, query) {
         val q = query.trim().lowercase()
-        items.filter {
-            val queryPass = q.isBlank() ||
-                it.name.lowercase().contains(q) ||
-                it.aliases.lowercase().contains(q) ||
+        if (q.isBlank()) items else items.filter {
+            it.name.lowercase().contains(q) || it.aliases.lowercase().contains(q) ||
                 it.muscles.any { muscle -> muscle.lowercase().contains(q) }
-            val musclePass = selectedMuscle == null || it.muscles.any { m -> m.equals(selectedMuscle, ignoreCase = true) }
-            val equipmentPass = selectedEquipment == null || it.equipment.equals(selectedEquipment, ignoreCase = true)
-            queryPass && musclePass && equipmentPass
         }
     }
 
-    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.22f))) {
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.35f))) {
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
@@ -188,11 +181,6 @@ private fun CatalogScreen(items: List<ExerciseCatalogItem>) {
             ) {
                 item {
                     Text("Каталог упражнений", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    Text(
-                        "Фото упражнения можно добавить при создании/редактировании записи тренировки.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                     OutlinedTextField(
                         value = query,
                         onValueChange = { query = it },
@@ -200,37 +188,12 @@ private fun CatalogScreen(items: List<ExerciseCatalogItem>) {
                         label = { Text("Поиск упражнения") },
                         singleLine = true
                     )
-                    if (muscleFilters.isNotEmpty()) {
-                        Spacer(Modifier.height(6.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            muscleFilters.take(3).forEach { muscle ->
-                                FilterChip(
-                                    selected = selectedMuscle == muscle,
-                                    onClick = { selectedMuscle = if (selectedMuscle == muscle) null else muscle },
-                                    label = { Text(muscle, maxLines = 1, overflow = TextOverflow.Ellipsis) }
-                                )
-                            }
-                        }
-                    }
-                    if (equipmentFilters.isNotEmpty()) {
-                        Spacer(Modifier.height(4.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            equipmentFilters.take(2).forEach { equipment ->
-                                FilterChip(
-                                    selected = selectedEquipment == equipment,
-                                    onClick = { selectedEquipment = if (selectedEquipment == equipment) null else equipment },
-                                    label = { Text(equipment, maxLines = 1, overflow = TextOverflow.Ellipsis) }
-                                )
-                            }
-                        }
-                    }
-                    Text("Найдено: ${filtered.size}", style = MaterialTheme.typography.bodySmall)
+                    Text("Найдено: ${filtered.size}")
+                    Spacer(Modifier.height(4.dp))
                 }
-
                 items(filtered, key = { it.id }) { item ->
                     Card(
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(18.dp),
                         colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surfaceVariant)
                     ) {
                         Row(
@@ -252,16 +215,13 @@ private fun CatalogScreen(items: List<ExerciseCatalogItem>) {
                                 Image(
                                     painter = rememberAsyncImagePainter(item.photoUri),
                                     contentDescription = item.name,
-                                    modifier = Modifier.size(52.dp).clip(RoundedCornerShape(12.dp)),
+                                    modifier = Modifier.size(56.dp).clip(RoundedCornerShape(12.dp)),
                                     contentScale = ContentScale.Crop
                                 )
                             }
-                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(item.name, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                 Text(item.muscles.joinToString(), style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                item.equipment?.let {
-                                    Text("Инвентарь: $it", style = MaterialTheme.typography.labelSmall)
-                                }
                             }
                         }
                     }
@@ -294,9 +254,9 @@ private fun WorkoutActiveView(
         }
         Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Новая тренировка")
-            Button(onClick = onStart, modifier = Modifier.fillMaxWidth()) { Text("Старт тренировки") }
+            Button(onClick = onStart) { Text("Старт тренировки") }
             OutlinedTextField(addQuery, { addQuery = it }, label = { Text("Поиск упражнения") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-            filtered.take(8).forEach { ex -> TextButton(onClick = { onAddExercise(ex) }) { Text(ex.name) } }
+            filtered.take(10).forEach { ex -> TextButton(onClick = { onAddExercise(ex) }) { Text(ex.name) } }
         }
         return
     }
@@ -332,12 +292,13 @@ private fun WorkoutActiveView(
                             )
                         }
                     }
-                    Button(onClick = { onRest(selectedPreset) }, modifier = Modifier.fillMaxWidth()) {
-                        Text("Запустить таймер", maxLines = 1)
-                    }
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(onClick = { onRest(selectedPreset) }, modifier = Modifier.weight(1f)) { Text("Старт", maxLines = 1) }
                         TextButton(onClick = onSkipRest, modifier = Modifier.weight(1f)) { Text("Пропустить", maxLines = 1) }
-                        TextButton(onClick = { onRestartRest(selectedPreset) }, modifier = Modifier.weight(1f)) { Text("Перезапустить", maxLines = 1) }
+                        TextButton(onClick = { onRestartRest(selectedPreset) }, modifier = Modifier.weight(1f)) { Text("Перезапуск", maxLines = 1) }
                     }
                 }
             }
@@ -345,7 +306,7 @@ private fun WorkoutActiveView(
 
         items(active.exercises, key = { it.exerciseId }) { exercise ->
             val catalogExercise = quickAdd.firstOrNull { it.id == exercise.exerciseId }
-            Card(shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
                         if (catalogExercise?.photoUri.isNullOrBlank()) {
@@ -357,7 +318,7 @@ private fun WorkoutActiveView(
                             Image(
                                 painter = rememberAsyncImagePainter(catalogExercise?.photoUri),
                                 contentDescription = exercise.exerciseName,
-                                modifier = Modifier.size(42.dp).clip(CircleShape),
+                                modifier = Modifier.size(42.dp).clip(RoundedCornerShape(10.dp)),
                                 contentScale = ContentScale.Crop
                             )
                         }
@@ -365,7 +326,10 @@ private fun WorkoutActiveView(
                             Text(exercise.exerciseName, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             Text(catalogExercise?.muscles?.joinToString().orEmpty(), style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             prMap[exercise.exerciseName]?.let {
-                                Text("PR: ${it.bestVolumeSet.toInt()} / ${"%.1f".format(it.bestE1rm)}", style = MaterialTheme.typography.labelMedium)
+                                Text(
+                                    "PR: ${it.bestVolumeSet.toInt()} / ${"%.1f".format(it.bestE1rm)}",
+                                    style = MaterialTheme.typography.labelMedium
+                                )
                             }
                         }
                     }
@@ -391,7 +355,6 @@ private fun WorkoutActiveView(
                 singleLine = true
             )
             filteredQuick.take(10).forEach { ex -> TextButton(onClick = { onAddExercise(ex) }) { Text(ex.name) } }
-            Spacer(Modifier.height(6.dp))
             Button(onClick = onFinish, modifier = Modifier.fillMaxWidth()) { Text("Завершить тренировку") }
         }
     }

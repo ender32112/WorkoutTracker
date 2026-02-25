@@ -34,9 +34,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.RoundedCornerShape
 import coil.compose.rememberAsyncImagePainter
 
 @Composable
@@ -95,17 +97,7 @@ fun TrainingListScreen(
                                     modifier = Modifier.fillMaxWidth(),
                                     verticalAlignment = Alignment.Top
                                 ) {
-                                    if (exercise.photoUri.isNullOrBlank()) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(46.dp)
-                                                .clip(RoundedCornerShape(10.dp))
-                                                .background(MaterialTheme.colorScheme.surface),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(Icons.Default.Image, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        }
-                                    } else {
+                                    if (exercise.photoUri != null) {
                                         Image(
                                             painter = rememberAsyncImagePainter(exercise.photoUri),
                                             contentDescription = exercise.name,
