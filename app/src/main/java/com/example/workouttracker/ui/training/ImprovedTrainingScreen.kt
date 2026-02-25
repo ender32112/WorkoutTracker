@@ -14,12 +14,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoGraph
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FitnessCenter
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.ViewCarousel
 import androidx.compose.material3.Button
@@ -109,14 +111,7 @@ fun ImprovedTrainingScreen(trainingViewModel: TrainingViewModel = viewModel()) {
                     onExport = {}
                 )
 
-                TrainingHomeView.CATALOG -> CatalogScreen(
-                    items = quick,
-                    onQuickAdd = trainingViewModel::addExerciseToActiveWorkout,
-                    onStartWorkout = {
-                        trainingViewModel.startWorkout()
-                        screen = TrainingHomeView.ACTIVE
-                    }
-                )
+                TrainingHomeView.CATALOG -> CatalogScreen(items = quick)
 
                 TrainingHomeView.TEMPLATES -> TrainingTemplatesScreen(
                     templates = templates,
@@ -175,14 +170,14 @@ private fun CatalogScreen(
                 .align(Alignment.Center)
                 .padding(horizontal = 12.dp),
             shape = RoundedCornerShape(24.dp),
-            tonalElevation = 8.dp,
-            shadowElevation = 8.dp
+            tonalElevation = 10.dp,
+            shadowElevation = 10.dp
         ) {
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 item {
                     Text("Каталог упражнений", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -206,9 +201,19 @@ private fun CatalogScreen(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            item.photoUri?.let {
+                            if (item.photoUri.isNullOrBlank()) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(52.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(MaterialTheme.colorScheme.surface),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(Icons.Default.Image, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            } else {
                                 Image(
-                                    painter = rememberAsyncImagePainter(it),
+                                    painter = rememberAsyncImagePainter(item.photoUri),
                                     contentDescription = item.name,
                                     modifier = Modifier.size(56.dp).clip(RoundedCornerShape(12.dp)),
                                     contentScale = ContentScale.Crop
@@ -218,14 +223,7 @@ private fun CatalogScreen(
                                 Text(item.name, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                 Text(item.muscles.joinToString(), style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             }
-                            TextButton(onClick = { onQuickAdd(item) }) { Text("Добавить") }
                         }
-                    }
-                }
-                item {
-                    Button(onClick = onStartWorkout, modifier = Modifier.fillMaxWidth()) {
-                        Icon(Icons.Default.PlayArrow, contentDescription = null)
-                        Text(" Начать тренировку")
                     }
                 }
             }
@@ -272,9 +270,12 @@ private fun WorkoutActiveView(
         }
     }
 
-    LazyColumn(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    LazyColumn(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+            Card(
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
                 Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Таймер отдыха", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Text("${active.restTimerSecondsLeft} сек")
@@ -307,10 +308,15 @@ private fun WorkoutActiveView(
             val catalogExercise = quickAdd.firstOrNull { it.id == exercise.exerciseId }
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        catalogExercise?.photoUri?.let {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+                        if (catalogExercise?.photoUri.isNullOrBlank()) {
+                            Box(
+                                modifier = Modifier.size(42.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surface),
+                                contentAlignment = Alignment.Center
+                            ) { Icon(Icons.Default.Image, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        } else {
                             Image(
-                                painter = rememberAsyncImagePainter(it),
+                                painter = rememberAsyncImagePainter(catalogExercise?.photoUri),
                                 contentDescription = exercise.exerciseName,
                                 modifier = Modifier.size(42.dp).clip(RoundedCornerShape(10.dp)),
                                 contentScale = ContentScale.Crop
@@ -334,7 +340,7 @@ private fun WorkoutActiveView(
                             TextButton(onClick = { onRemoveSet(exercise.exerciseId, idx) }) { Icon(Icons.Default.Delete, null) }
                         }
                     }
-                    TextButton(onClick = { onAddSet(exercise.exerciseId) }) { Text("+ Сет") }
+                    TextButton(onClick = { onAddSet(exercise.exerciseId) }) { Text("+ Добавить сет") }
                 }
             }
         }
