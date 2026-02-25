@@ -1,90 +1,91 @@
 package com.example.workouttracker.ui.training
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.FavoriteBorder
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.rememberAsyncImagePainter
 import com.example.workouttracker.ui.components.SectionHeader
 import com.example.workouttracker.viewmodel.TrainingViewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
+private enum class TrainingHomeView { LIST, CATALOG, TEMPLATES, PROGRESS, ACTIVE }
+
 @Composable
 fun ImprovedTrainingScreen(trainingViewModel: TrainingViewModel = viewModel()) {
     val quick by trainingViewModel.quickAddExercises.collectAsState()
     val active by trainingViewModel.activeWorkout.collectAsState()
     val prs by trainingViewModel.exercisePr.collectAsState()
     val weekly by trainingViewModel.weeklyVolume.collectAsState()
+    val sessions by trainingViewModel.sessions.collectAsState()
+    val templates by trainingViewModel.templates.collectAsState()
+    val prMap by trainingViewModel.exercisePrMap.collectAsState()
 
-    var selectedTab by remember { mutableIntStateOf(0) }
-    var showBottomSheet by remember { mutableStateOf(false) }
+    var screen by remember { mutableStateOf(TrainingHomeView.LIST) }
 
-    Scaffold(
-        topBar = { SectionHeader(title = "Тренировки") },
-        floatingActionButton = {
-            if (selectedTab == 0) {
-                FloatingActionButton(onClick = { showBottomSheet = true }) {
-                    Icon(Icons.Default.Add, contentDescription = null)
-                }
-            }
-        }
-    ) { padding ->
+    Scaffold(topBar = { SectionHeader(title = "Тренировки") }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            TabRow(selectedTabIndex = selectedTab) {
-                listOf("Каталог", "Тренировка", "Прогресс").forEachIndexed { index, title ->
-                    Tab(selected = selectedTab == index, onClick = { selectedTab = index }, text = { Text(title) })
-                }
-            }
-
-            when (selectedTab) {
-                0 -> CatalogGrid(
-                    items = quick,
-                    onFavoriteToggle = { id, value -> trainingViewModel.toggleFavorite(id, value) },
-                    onDelete = trainingViewModel::deleteExercise,
-                    onQuickAdd = trainingViewModel::addExerciseToActiveWorkout
+            when (screen) {
+                TrainingHomeView.LIST -> TrainingListScreen(
+                    sessions = sessions,
+                    onStartWorkout = {
+                        trainingViewModel.startWorkout()
+                        screen = TrainingHomeView.ACTIVE
+                    },
+                    onOpenCatalog = { screen = TrainingHomeView.CATALOG },
+                    onOpenTemplates = { screen = TrainingHomeView.TEMPLATES },
+                    onOpenProgress = { screen = TrainingHomeView.PROGRESS },
+                    onRepeat = {
+                        trainingViewModel.repeatSession(it)
+                        screen = TrainingHomeView.ACTIVE
+                    },
+                    onExport = {}
                 )
-                1 -> WorkoutActiveView(
+
+                TrainingHomeView.CATALOG -> CatalogScreen(quick, trainingViewModel::addExerciseToActiveWorkout) { screen = TrainingHomeView.LIST }
+                TrainingHomeView.TEMPLATES -> TrainingTemplatesScreen(
+                    templates = templates,
+                    exercises = quick,
+                    onCreateTemplate = trainingViewModel::createTemplate,
+                    onAddExerciseToTemplate = trainingViewModel::addExerciseToTemplate,
+                    onRemoveExerciseFromTemplate = trainingViewModel::removeExerciseFromTemplate,
+                    onStartFromTemplate = {
+                        trainingViewModel.startWorkoutFromTemplate(it)
+                        screen = TrainingHomeView.ACTIVE
+                    }
+                )
+
+                TrainingHomeView.PROGRESS -> ProgressOverview(prs, weekly) { screen = TrainingHomeView.LIST }
+                TrainingHomeView.ACTIVE -> WorkoutActiveView(
                     active = active,
                     quickAdd = quick,
+                    prMap = prMap,
                     onStart = trainingViewModel::startWorkout,
                     onAddExercise = trainingViewModel::addExerciseToActiveWorkout,
                     onSetUpdate = trainingViewModel::updateSet,
@@ -93,61 +94,26 @@ fun ImprovedTrainingScreen(trainingViewModel: TrainingViewModel = viewModel()) {
                     onRest = trainingViewModel::startRestTimer,
                     onSkipRest = trainingViewModel::skipRestTimer,
                     onRestartRest = trainingViewModel::restartRestTimer,
-                    onFinish = trainingViewModel::finishWorkout
+                    onFinish = {
+                        trainingViewModel.finishWorkout()
+                        screen = TrainingHomeView.LIST
+                    },
+                    onBack = { screen = TrainingHomeView.LIST }
                 )
-                else -> ProgressOverview(prs, weekly)
             }
         }
     }
-
-    if (showBottomSheet) {
-        AddTrainingBottomSheet(
-            availableExercises = quick,
-            onSave = { session ->
-                session.exercises.forEach { exercise ->
-                    trainingViewModel.addOrUpdateExercise(
-                        name = exercise.name,
-                        muscles = emptyList(),
-                        equipment = null,
-                        aliases = "",
-                        favorite = false,
-                        photoUri = exercise.photoUri
-                    )
-                }
-                showBottomSheet = false
-            },
-            onDismiss = { showBottomSheet = false }
-        )
-    }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun CatalogGrid(
-    items: List<ExerciseCatalogItem>,
-    onFavoriteToggle: (Long, Boolean) -> Unit,
-    onDelete: (Long) -> Unit,
-    onQuickAdd: (ExerciseCatalogItem) -> Unit
-) {
-    LazyVerticalGrid(columns = GridCells.Adaptive(170.dp), modifier = Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+private fun CatalogScreen(items: List<ExerciseCatalogItem>, onQuickAdd: (ExerciseCatalogItem) -> Unit, onBack: () -> Unit) {
+    LazyColumn(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        item { TextButton(onClick = onBack) { Text("← Назад") } }
         items(items, key = { it.id }) { item ->
             Card(modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(item.name)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        item.muscles.take(3).forEach { muscle ->
-                            AssistChip(onClick = {}, label = { Text(muscle) })
-                        }
-                    }
-                    Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                        TextButton(onClick = { onQuickAdd(item) }) { Text("+ в тренировку") }
-                        IconButton(onClick = { onFavoriteToggle(item.id, !item.favorite) }) {
-                            Icon(if (item.favorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder, null)
-                        }
-                        if (!item.isBase) {
-                            IconButton(onClick = { onDelete(item.id) }) { Icon(Icons.Default.Delete, null) }
-                        }
-                    }
+                    TextButton(onClick = { onQuickAdd(item) }) { Text("+ в тренировку") }
                 }
             }
         }
@@ -158,6 +124,7 @@ private fun CatalogGrid(
 private fun WorkoutActiveView(
     active: ActiveWorkoutUiState?,
     quickAdd: List<ExerciseCatalogItem>,
+    prMap: Map<String, ExercisePrUi>,
     onStart: () -> Unit,
     onAddExercise: (ExerciseCatalogItem) -> Unit,
     onSetUpdate: (Long, Int, String?, String?) -> Unit,
@@ -166,10 +133,12 @@ private fun WorkoutActiveView(
     onRest: (Int) -> Unit,
     onSkipRest: () -> Unit,
     onRestartRest: (Int) -> Unit,
-    onFinish: () -> Unit
+    onFinish: () -> Unit,
+    onBack: () -> Unit
 ) {
     if (active == null) {
         Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = onBack) { Text("← Назад") }
             Button(onClick = onStart) { Text("Старт тренировки") }
             quickAdd.take(8).forEach { ex -> TextButton(onClick = { onAddExercise(ex) }) { Text(ex.name) } }
         }
@@ -178,6 +147,7 @@ private fun WorkoutActiveView(
 
     LazyColumn(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
+            TextButton(onClick = onBack) { Text("← К списку") }
             Card {
                 Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Rest Timer: ${active.restTimerSecondsLeft} сек")
@@ -195,14 +165,29 @@ private fun WorkoutActiveView(
         }
 
         items(active.exercises, key = { it.exerciseId }) { exercise ->
+            val catalogExercise = quickAdd.firstOrNull { it.id == exercise.exerciseId }
             Card {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(exercise.exerciseName)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        catalogExercise?.photoUri?.let {
+                            Image(
+                                painter = rememberAsyncImagePainter(it),
+                                contentDescription = exercise.exerciseName,
+                                modifier = Modifier.size(48.dp),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                        Column(Modifier.weight(1f)) {
+                            Text(exercise.exerciseName)
+                            Text(catalogExercise?.muscles?.joinToString().orEmpty())
+                            prMap[exercise.exerciseName]?.let { Text("PR: ${it.bestVolumeSet.toInt()} / ${"%.1f".format(it.bestE1rm)}") }
+                        }
+                    }
                     exercise.sets.forEachIndexed { idx, set ->
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                             OutlinedTextField(set.weight, { onSetUpdate(exercise.exerciseId, idx, it, null) }, label = { Text("Вес") }, modifier = Modifier.weight(1f))
                             OutlinedTextField(set.reps, { onSetUpdate(exercise.exerciseId, idx, null, it) }, label = { Text("Повт") }, modifier = Modifier.weight(1f))
-                            IconButton(onClick = { onRemoveSet(exercise.exerciseId, idx) }) { Icon(Icons.Default.Delete, null) }
+                            TextButton(onClick = { onRemoveSet(exercise.exerciseId, idx) }) { androidx.compose.material3.Icon(Icons.Default.Delete, null) }
                         }
                     }
                     TextButton(onClick = { onAddSet(exercise.exerciseId) }) { Text("+ Сет") }
@@ -219,19 +204,28 @@ private fun WorkoutActiveView(
 }
 
 @Composable
-private fun ProgressOverview(prs: List<ExercisePrUi>, weekly: List<WeeklyVolumeUi>) {
+private fun ProgressOverview(prs: List<ExercisePrUi>, weekly: List<WeeklyVolumeUi>, onBack: () -> Unit) {
     LazyColumn(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        item { TextButton(onClick = onBack) { Text("← Назад") } }
         item {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp)) {
-                    Text("Графики прогресса")
-                    Text("Плейсхолдер для графиков (будет подключен на следующем этапе)")
+                    Text("Лучшие PR")
+                    prs.sortedByDescending { it.bestVolumeSet }.take(10).forEach { pr ->
+                        Text("${pr.exerciseName}: volume ${pr.bestVolumeSet.toInt()} / e1RM ${"%.1f".format(pr.bestE1rm)}")
+                    }
                 }
             }
         }
-        item { Text("PR") }
-        items(prs) { pr -> Text("${pr.exerciseName}: volume ${pr.bestVolumeSet.toInt()} / e1RM ${"%.1f".format(pr.bestE1rm)}") }
-        item { Spacer(Modifier.height(8.dp)); Text("Недельный объём") }
-        items(weekly) { w -> Text("${w.weekKey}: ${w.volume}") }
+        item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp)) {
+                    Text("Недельный объём")
+                    Text("Placeholder chart")
+                    Spacer(Modifier.height(8.dp))
+                    weekly.forEach { w -> Text("${w.weekKey}: ${w.volume.toInt()}") }
+                }
+            }
+        }
     }
 }
