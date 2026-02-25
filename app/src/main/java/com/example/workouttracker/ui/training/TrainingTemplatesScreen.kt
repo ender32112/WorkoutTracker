@@ -23,7 +23,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -42,12 +41,11 @@ fun TrainingTemplatesScreen(
 ) {
     var templateTitle by remember { mutableStateOf("") }
     var selectedTemplateId by remember { mutableLongStateOf(0L) }
-    val queries = remember { mutableStateMapOf<Long, String>() }
 
     Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(10.dp)) {
-                OutlinedTextField(templateTitle, { templateTitle = it }, label = { Text("Новый шаблон") }, modifier = Modifier.weight(1f), singleLine = true)
+                OutlinedTextField(templateTitle, { templateTitle = it }, label = { Text("Новый шаблон") }, modifier = Modifier.weight(1f))
                 Button(onClick = {
                     onCreateTemplate(templateTitle)
                     templateTitle = ""
@@ -57,14 +55,9 @@ fun TrainingTemplatesScreen(
 
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(templates, key = { it.id }) { template ->
-                val search = queries[template.id].orEmpty()
-                val availableExercises = exercises.filterNot { catalog ->
-                    template.exercises.any { it.exerciseId == catalog.id }
-                }.filter {
-                    search.isBlank() || it.name.contains(search, ignoreCase = true) ||
-                        it.aliases.contains(search, ignoreCase = true) ||
-                        it.muscles.any { muscle -> muscle.contains(search, ignoreCase = true) }
-                }.take(20)
+                val availableExercises = exercises
+                    .filterNot { catalog -> template.exercises.any { it.exerciseId == catalog.id } }
+                    .take(15)
 
                 Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -87,13 +80,6 @@ fun TrainingTemplatesScreen(
 
                         if (selectedTemplateId == template.id) {
                             Text("Добавить упражнения", fontWeight = FontWeight.SemiBold)
-                            OutlinedTextField(
-                                value = search,
-                                onValueChange = { queries[template.id] = it },
-                                label = { Text("Поиск упражнения") },
-                                modifier = Modifier.fillMaxWidth(),
-                                singleLine = true
-                            )
                             availableExercises.forEach { exercise ->
                                 val defaults = smartDefaultsByMuscle(exercise.muscles)
                                 TextButton(onClick = {

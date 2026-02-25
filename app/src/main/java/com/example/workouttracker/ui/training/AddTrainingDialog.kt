@@ -68,7 +68,6 @@ fun AddTrainingBottomSheet(
     var showDatePicker by remember { mutableStateOf(false) }
 
     var name by remember { mutableStateOf("") }
-    var search by remember { mutableStateOf("") }
     var sets by remember { mutableStateOf("3") }
     var reps by remember { mutableStateOf("10") }
     var weight by remember { mutableStateOf("0") }
@@ -99,34 +98,7 @@ fun AddTrainingBottomSheet(
                 }
             }
             item {
-                OutlinedTextField(
-                    search,
-                    {
-                        search = it.take(40)
-                        name = it.take(40)
-                        nameErr = null
-                    },
-                    label = { Text("Поиск упражнения") },
-                    isError = nameErr != null,
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
-                availableExercises
-                    .filter {
-                        search.isNotBlank() && (
-                            it.name.contains(search, ignoreCase = true) ||
-                                it.aliases.contains(search, ignoreCase = true)
-                            )
-                    }
-                    .take(6)
-                    .forEach { matched ->
-                        TextButton(onClick = {
-                            name = matched.name
-                            search = matched.name
-                        }) {
-                            Text(matched.name)
-                        }
-                    }
+                OutlinedTextField(name, { name = it.take(40); nameErr = null }, label = { Text("Упражнение") }, isError = nameErr != null, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(sets, { sets = it.filter(Char::isDigit).take(2) }, label = { Text("Подходы") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(reps, { reps = it.filter(Char::isDigit).take(3) }, label = { Text("Повторы") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(weight, { weight = it.replace(',', '.').filter { c -> c.isDigit() || c == '.' }.take(6) }, label = { Text("Вес") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth())
@@ -161,7 +133,6 @@ fun AddTrainingBottomSheet(
                             )
                         )
                         name = ""
-                        search = ""
                         photoUri = null
                     }) { Text("Добавить") }
                 }
