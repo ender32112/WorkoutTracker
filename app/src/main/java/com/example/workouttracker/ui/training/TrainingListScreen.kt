@@ -28,10 +28,13 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.RoundedCornerShape
 import coil.compose.rememberAsyncImagePainter
 
 @Composable
@@ -67,7 +70,7 @@ fun TrainingListScreen(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                     elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
                 ) {
-                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Column {
                                 Text(session.date, fontWeight = FontWeight.Bold)
@@ -79,24 +82,44 @@ fun TrainingListScreen(
                         }
                         if (expanded) {
                             session.exercises.forEach { exercise ->
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.Top
+                                ) {
                                     if (exercise.photoUri != null) {
                                         Image(
                                             painter = rememberAsyncImagePainter(exercise.photoUri),
                                             contentDescription = exercise.name,
-                                            modifier = Modifier.size(52.dp),
+                                            modifier = Modifier
+                                                .size(46.dp)
+                                                .clip(RoundedCornerShape(10.dp)),
                                             contentScale = ContentScale.Crop
                                         )
                                     }
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text(exercise.name, fontWeight = FontWeight.Medium)
+                                        Text(
+                                            exercise.name,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
                                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                            exercise.muscles.take(3).forEach { AssistChip(onClick = {}, label = { Text(it) }) }
+                                            exercise.muscles.take(3).forEach {
+                                                AssistChip(onClick = {}, label = { Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis) })
+                                            }
                                         }
-                                        Text(exercise.sets.joinToString(" • ") { "${it.order}) ${it.weight}кг × ${it.reps}" })
+                                        Text(
+                                            exercise.sets.joinToString(" • ") { "${it.order}) ${it.weight}кг × ${it.reps}" },
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
                                     }
                                     exercise.pr?.let {
-                                        Text("PR ${it.bestVolumeSet.toInt()}")
+                                        Text(
+                                            "PR ${it.bestVolumeSet.toInt()}",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            maxLines = 1
+                                        )
                                     }
                                 }
                             }
