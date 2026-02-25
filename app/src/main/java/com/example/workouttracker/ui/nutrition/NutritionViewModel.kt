@@ -4,6 +4,10 @@ import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.workouttracker.data.local.FridgeItemEntity
+import com.example.workouttracker.data.local.NutritionEntryEntity
+import com.example.workouttracker.data.local.UserEntity
+import com.example.workouttracker.data.local.WorkoutTrackerDatabase
 import com.example.workouttracker.ui.nutrition.Dish
 import com.example.workouttracker.ui.nutrition.DishIngredient
 import com.example.workouttracker.ui.nutrition.Ingredient
@@ -17,6 +21,10 @@ import com.example.workouttracker.ui.nutrition.ProfileRepository
 import com.example.workouttracker.llm.NutritionAiRepository
 import com.example.workouttracker.ui.nutrition.BehaviorPreferencesRepository
 import com.example.workouttracker.ui.nutrition.FridgeProduct
+import com.example.workouttracker.ui.nutrition.QuantityUnit
+import com.example.workouttracker.ui.nutrition.ProductLookupResult
+import com.example.workouttracker.ui.nutrition.OpenFoodFactsRepository
+import com.example.workouttracker.ui.nutrition.FridgeItemUiModel
 import com.example.workouttracker.ui.nutrition_analytic.DailyAnalytics
 import com.example.workouttracker.ui.nutrition_analytic.FoodRating
 import com.example.workouttracker.ui.nutrition_analytic.FoodCanonicalizer
@@ -24,6 +32,7 @@ import com.example.workouttracker.ui.nutrition_analytic.NutritionAnalyticsEngine
 import com.example.workouttracker.ui.nutrition_analytic.WeeklyAnalytics
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
@@ -39,6 +48,8 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     private val authPrefs = application.getSharedPreferences(AuthViewModel.AUTH_PREFS_NAME, Context.MODE_PRIVATE)
     private val userId = authPrefs.getString(AuthViewModel.KEY_CURRENT_USER_ID, null) ?: "guest"
     private val prefs = application.getSharedPreferences("nutrition_prefs_" + userId, Context.MODE_PRIVATE)
+    private val dao = WorkoutTrackerDatabase.getInstance(application).dao()
+    private val productRepository = OpenFoodFactsRepository(dao)
     private val profileRepository = ProfileRepository(application.applicationContext)
     private val nutritionAiRepository = NutritionAiRepository.getInstance(application.applicationContext, userId)
     private val behaviorRepository = BehaviorPreferencesRepository(application.applicationContext, userId)
@@ -79,6 +90,15 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     private val _foodRatings = MutableStateFlow<List<FoodRating>>(emptyList())
     val foodRatings: StateFlow<List<FoodRating>> = _foodRatings
 
+    private val _fridgeItems = MutableStateFlow<List<FridgeItemUiModel>>(emptyList())
+    val fridgeItems = _fridgeItems.asStateFlow()
+
+    private val _selectedTab = MutableStateFlow(0)
+    val selectedTab = _selectedTab.asStateFlow()
+
+    private val _lookupProduct = MutableStateFlow<ProductLookupResult?>(null)
+    val lookupProduct = _lookupProduct.asStateFlow()
+
     var dailyNorm = mapOf<String, Int>()
 
     data class DailyNutritionSummary(
@@ -116,6 +136,49 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         if (cached != null) {
             _mealPlan.value = cached
         }
+
+        viewModelScope.launch {
+            dao.upsertUser(UserEntity(id = userId, name = userId, email = ""))
+            dao.observeNutritionEntries(userId).collect { rows ->
+                _entries.value = rows.mapNotNull { row ->
+                    runCatching { parseNutritionEntity(row) }.getOrNull()
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            dao.observeFridgeItems(userId).collect { rows ->
+                _fridgeItems.value = rows.map {
+                    FridgeItemUiModel(
+                        id = it.id,
+                        name = it.name,
+                        unitType = if (it.unitType == QuantityUnit.PIECES.name) QuantityUnit.PIECES else QuantityUnit.GRAMS,
+                        amount = it.amount,
+                        calories100 = it.calories100,
+                        protein100 = it.protein100,
+                        fats100 = it.fats100,
+                        carbs100 = it.carbs100,
+                        barcode = it.barcode
+                    )
+                }
+            }
+        }
+    }
+
+    fun selectTab(index: Int) {
+        _selectedTab.value = index
+    }
+
+    private fun parseNutritionEntity(entity: NutritionEntryEntity): NutritionEntry {
+        val root = JSONObject(entity.dishJson)
+        val dish = parseDish(root)
+        return NutritionEntry(
+            id = UUID.fromString(entity.id),
+            date = entity.dateIso,
+            mealType = MealType.values().firstOrNull { it.name == entity.mealType } ?: MealType.OTHER,
+            dish = dish,
+            portionWeight = entity.portionWeight
+        )
     }
 
     fun getEntriesByDate(date: String): Map<MealType, List<NutritionEntry>> {
@@ -348,14 +411,19 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun saveEntries() {
-        try {
-            val jsonArray = JSONArray()
+        viewModelScope.launch {
             _entries.value.forEach { entry ->
-                jsonArray.put(entry.toJson())
+                dao.upsertNutritionEntry(
+                    NutritionEntryEntity(
+                        id = entry.id.toString(),
+                        userId = userId,
+                        dateIso = entry.date,
+                        mealType = entry.mealType.name,
+                        dishJson = entry.dish.toJson().toString(),
+                        portionWeight = entry.portionWeight
+                    )
+                )
             }
-            prefs.edit().putString("entries", jsonArray.toString()).apply()
-        } catch (e: Exception) {
-            e.printStackTrace()
         }
     }
 
@@ -406,12 +474,93 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun removeEntry(id: UUID) {
         _entries.value = _entries.value.filterNot { it.id == id }
+        viewModelScope.launch { dao.deleteNutritionEntry(userId, id.toString()) }
         saveEntries()
     }
 
     fun updateEntry(updated: NutritionEntry) {
         _entries.value = _entries.value.map { if (it.id == updated.id) updated else it }
         saveEntries()
+    }
+
+    fun lookupBarcode(code: String) {
+        viewModelScope.launch {
+            _lookupProduct.value = productRepository.lookupByBarcode(code)
+        }
+    }
+
+    fun clearLookupProduct() {
+        _lookupProduct.value = null
+    }
+
+    fun addScannedProductToDiary(
+        date: String,
+        mealType: MealType,
+        product: ProductLookupResult,
+        grams: Int
+    ) {
+        addEntry(
+            date = date,
+            mealType = mealType,
+            dish = Dish(
+                name = product.name,
+                ingredients = listOf(
+                    DishIngredient(
+                        ingredient = Ingredient(
+                            name = product.name,
+                            caloriesPer100g = product.calories100.toFloat(),
+                            proteinPer100g = product.protein100.toFloat(),
+                            fatsPer100g = product.fats100.toFloat(),
+                            carbsPer100g = product.carbs100.toFloat()
+                        ),
+                        weightInDish = grams
+                    )
+                )
+            ),
+            portionWeight = grams
+        )
+    }
+
+    fun addScannedProductToFridge(product: ProductLookupResult, amount: Int, unit: QuantityUnit) {
+        viewModelScope.launch {
+            dao.upsertFridgeItem(
+                FridgeItemEntity(
+                    userId = userId,
+                    name = product.name,
+                    unitType = unit.name,
+                    amount = amount,
+                    calories100 = product.calories100,
+                    protein100 = product.protein100,
+                    fats100 = product.fats100,
+                    carbs100 = product.carbs100,
+                    barcode = product.barcode
+                )
+            )
+        }
+    }
+
+    fun deductFridgeItem(item: FridgeItemUiModel, amount: Int) {
+        viewModelScope.launch {
+            val left = (item.amount - amount).coerceAtLeast(0)
+            if (left == 0) {
+                dao.deleteFridgeItem(userId, item.id)
+            } else {
+                dao.updateFridgeItem(
+                    FridgeItemEntity(
+                        id = item.id,
+                        userId = userId,
+                        name = item.name,
+                        unitType = item.unitType.name,
+                        amount = left,
+                        calories100 = item.calories100,
+                        protein100 = item.protein100,
+                        fats100 = item.fats100,
+                        carbs100 = item.carbs100,
+                        barcode = item.barcode
+                    )
+                )
+            }
+        }
     }
 
     fun updateProfile(profile: NutritionProfile) {

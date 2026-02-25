@@ -7,6 +7,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Relation
 import androidx.room.Transaction
+import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -143,6 +144,33 @@ interface WorkoutTrackerDao {
 
     @Query("SELECT * FROM step_entries WHERE userId = :userId ORDER BY dateIso DESC")
     fun observeStepEntries(userId: String): Flow<List<StepEntryEntity>>
+
+    @Query("SELECT * FROM nutrition_entries WHERE userId = :userId ORDER BY dateIso DESC, createdAt DESC")
+    fun observeNutritionEntries(userId: String): Flow<List<NutritionEntryEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertNutritionEntry(entry: NutritionEntryEntity)
+
+    @Query("DELETE FROM nutrition_entries WHERE id = :entryId AND userId = :userId")
+    suspend fun deleteNutritionEntry(userId: String, entryId: String)
+
+    @Query("SELECT * FROM fridge_items WHERE userId = :userId ORDER BY updatedAt DESC")
+    fun observeFridgeItems(userId: String): Flow<List<FridgeItemEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertFridgeItem(item: FridgeItemEntity): Long
+
+    @Update
+    suspend fun updateFridgeItem(item: FridgeItemEntity)
+
+    @Query("DELETE FROM fridge_items WHERE id = :itemId AND userId = :userId")
+    suspend fun deleteFridgeItem(userId: String, itemId: Long)
+
+    @Query("SELECT * FROM product_cache WHERE barcode = :barcode LIMIT 1")
+    suspend fun getCachedProductByBarcode(barcode: String): ProductCacheEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertCachedProduct(item: ProductCacheEntity)
 
     @Transaction
     suspend fun persistWorkoutPerformed(

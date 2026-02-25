@@ -129,5 +129,6 @@ dependencies {
     kapt("androidx.room:room-compiler:2.7.0")
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("androidx.work:work-runtime-ktx:2.10.0")
+    implementation("com.google.mlkit:barcode-scanning:17.3.0")
 
 }
