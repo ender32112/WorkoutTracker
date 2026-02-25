@@ -256,7 +256,7 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun startRestTimer(seconds: Int = 90) {
+    fun startRestTimer(seconds: Int = 60) {
         timerJob?.cancel()
         val current = _activeWorkout.value ?: return
         _activeWorkout.value = current.copy(restTimerSecondsLeft = seconds, timerRunning = true)
@@ -278,7 +278,7 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
         persistActiveWorkout()
     }
 
-    fun restartRestTimer(seconds: Int = 90) = startRestTimer(seconds)
+    fun restartRestTimer(seconds: Int = 60) = startRestTimer(seconds)
 
     fun finishWorkout() {
         val active = _activeWorkout.value ?: return
@@ -342,7 +342,7 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
 
     private suspend fun seedBaseCatalogIfNeeded() {
         if (dao.countBaseExercises(userId) > 0) return
-        defaultBaseExercises.forEach { (name, muscles, aliases, equipment) ->
+        defaultBaseExercises.forEach { (name, muscles, aliases, equipment, photoUri) ->
             dao.upsertExercise(
                 ExerciseEntity(
                     userId = userId,
@@ -350,6 +350,7 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
                     aliases = aliases,
                     muscles = muscles,
                     equipment = equipment,
+                    photoUri = photoUri,
                     isBase = true
                 )
             )
@@ -420,21 +421,69 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
         }
 
         private val defaultBaseExercises = listOf(
-            BaseExerciseSeed("Жим лёжа", "Грудь,Трицепс", "bench press", "Штанга"),
-            BaseExerciseSeed("Приседания со штангой", "Квадрицепс,Ягодицы", "back squat", "Штанга"),
-            BaseExerciseSeed("Становая тяга", "Спина,Ягодицы", "deadlift", "Штанга"),
-            BaseExerciseSeed("Подтягивания", "Спина,Бицепс", "pull up", "Турник"),
-            BaseExerciseSeed("Жим гантелей сидя", "Плечи,Трицепс", "dumbbell shoulder press", "Гантели"),
-            BaseExerciseSeed("Тяга горизонтального блока", "Спина", "seated row", "Тренажёр"),
-            BaseExerciseSeed("Выпады", "Квадрицепс,Ягодицы", "lunges", "Гантели"),
-            BaseExerciseSeed("Планка", "Пресс", "plank", null)
+            BaseExerciseSeed("Жим лёжа", "Грудь,Трицепс", "bench press", "Штанга", "https://picsum.photos/seed/workout_01/320/220"),
+            BaseExerciseSeed("Приседания со штангой", "Квадрицепс,Ягодицы", "back squat", "Штанга", "https://picsum.photos/seed/workout_02/320/220"),
+            BaseExerciseSeed("Становая тяга", "Спина,Ягодицы", "deadlift", "Штанга", "https://picsum.photos/seed/workout_03/320/220"),
+            BaseExerciseSeed("Подтягивания", "Спина,Бицепс", "pull up", "Турник", "https://picsum.photos/seed/workout_04/320/220"),
+            BaseExerciseSeed("Жим гантелей сидя", "Плечи,Трицепс", "dumbbell shoulder press", "Гантели", "https://picsum.photos/seed/workout_05/320/220"),
+            BaseExerciseSeed("Тяга горизонтального блока", "Спина", "seated row", "Тренажёр", "https://picsum.photos/seed/workout_06/320/220"),
+            BaseExerciseSeed("Выпады", "Квадрицепс,Ягодицы", "lunges", "Гантели", "https://picsum.photos/seed/workout_07/320/220"),
+            BaseExerciseSeed("Планка", "Пресс", "plank", null, "https://picsum.photos/seed/workout_08/320/220"),
+            BaseExerciseSeed("Французский жим", "Трицепс", "skull crusher", "Штанга", "https://picsum.photos/seed/workout_09/320/220"),
+            BaseExerciseSeed("Сгибание рук с гантелями", "Бицепс", "bicep curl", "Гантели", "https://picsum.photos/seed/workout_10/320/220"),
+            BaseExerciseSeed("Отжимания на брусьях", "Грудь,Трицепс", "dips", "Брусья", "https://picsum.photos/seed/workout_11/320/220"),
+            BaseExerciseSeed("Тяга верхнего блока", "Спина,Бицепс", "lat pulldown", "Тренажёр", "https://picsum.photos/seed/workout_12/320/220"),
+            BaseExerciseSeed("Жим ногами", "Квадрицепс,Ягодицы", "leg press", "Тренажёр", "https://picsum.photos/seed/workout_13/320/220"),
+            BaseExerciseSeed("Румынская тяга", "Бицепс бедра,Ягодицы", "romanian deadlift", "Штанга", "https://picsum.photos/seed/workout_14/320/220"),
+            BaseExerciseSeed("Гиперэкстензия", "Поясница,Ягодицы", "hyperextension", "Скамья", "https://picsum.photos/seed/workout_15/320/220"),
+            BaseExerciseSeed("Разводка гантелей лёжа", "Грудь", "dumbbell fly", "Гантели", "https://picsum.photos/seed/workout_16/320/220"),
+            BaseExerciseSeed("Сведение рук в кроссовере", "Грудь", "cable fly", "Кроссовер", "https://picsum.photos/seed/workout_17/320/220"),
+            BaseExerciseSeed("Подъём штанги на бицепс", "Бицепс", "barbell curl", "Штанга", "https://picsum.photos/seed/workout_18/320/220"),
+            BaseExerciseSeed("Молотки", "Бицепс,Предплечья", "hammer curl", "Гантели", "https://picsum.photos/seed/workout_19/320/220"),
+            BaseExerciseSeed("Разгибание рук на блоке", "Трицепс", "tricep pushdown", "Кроссовер", "https://picsum.photos/seed/workout_20/320/220"),
+            BaseExerciseSeed("Жим Арнольда", "Плечи", "arnold press", "Гантели", "https://picsum.photos/seed/workout_21/320/220"),
+            BaseExerciseSeed("Подъём гантелей в стороны", "Плечи", "lateral raise", "Гантели", "https://picsum.photos/seed/workout_22/320/220"),
+            BaseExerciseSeed("Тяга штанги в наклоне", "Спина,Бицепс", "barbell row", "Штанга", "https://picsum.photos/seed/workout_23/320/220"),
+            BaseExerciseSeed("Тяга Т-грифа", "Спина", "t-bar row", "Тренажёр", "https://picsum.photos/seed/workout_24/320/220"),
+            BaseExerciseSeed("Тяга гантели к поясу", "Спина", "one arm row", "Гантели", "https://picsum.photos/seed/workout_25/320/220"),
+            BaseExerciseSeed("Фронтальные приседания", "Квадрицепс,Кор", "front squat", "Штанга", "https://picsum.photos/seed/workout_26/320/220"),
+            BaseExerciseSeed("Болгарские выпады", "Квадрицепс,Ягодицы", "bulgarian split squat", "Гантели", "https://picsum.photos/seed/workout_27/320/220"),
+            BaseExerciseSeed("Подъём на носки стоя", "Икры", "standing calf raise", "Тренажёр", "https://picsum.photos/seed/workout_28/320/220"),
+            BaseExerciseSeed("Подъём на носки сидя", "Икры", "seated calf raise", "Тренажёр", "https://picsum.photos/seed/workout_29/320/220"),
+            BaseExerciseSeed("Скручивания", "Пресс", "crunch", "Коврик", "https://picsum.photos/seed/workout_30/320/220"),
+            BaseExerciseSeed("Подъём ног в висе", "Пресс", "hanging leg raise", "Турник", "https://picsum.photos/seed/workout_31/320/220"),
+            BaseExerciseSeed("Русский твист", "Пресс", "russian twist", "Медбол", "https://picsum.photos/seed/workout_32/320/220"),
+            BaseExerciseSeed("Ягодичный мост", "Ягодицы,Бицепс бедра", "glute bridge", "Штанга", "https://picsum.photos/seed/workout_33/320/220"),
+            BaseExerciseSeed("Хип траст", "Ягодицы", "hip thrust", "Штанга", "https://picsum.photos/seed/workout_34/320/220"),
+            BaseExerciseSeed("Сгибание ног лёжа", "Бицепс бедра", "leg curl", "Тренажёр", "https://picsum.photos/seed/workout_35/320/220"),
+            BaseExerciseSeed("Разгибание ног сидя", "Квадрицепс", "leg extension", "Тренажёр", "https://picsum.photos/seed/workout_36/320/220"),
+            BaseExerciseSeed("Пуловер", "Грудь,Спина", "pullover", "Гантели", "https://picsum.photos/seed/workout_37/320/220"),
+            BaseExerciseSeed("Шраги", "Трапеция", "shrug", "Гантели", "https://picsum.photos/seed/workout_38/320/220"),
+            BaseExerciseSeed("Тяга к подбородку", "Плечи,Трапеция", "upright row", "Штанга", "https://picsum.photos/seed/workout_39/320/220"),
+            BaseExerciseSeed("Face pull", "Задняя дельта,Трапеция", "face pull", "Кроссовер", "https://picsum.photos/seed/workout_40/320/220"),
+            BaseExerciseSeed("Обратные разведения", "Задняя дельта", "rear delt fly", "Гантели", "https://picsum.photos/seed/workout_41/320/220"),
+            BaseExerciseSeed("Жим узким хватом", "Грудь,Трицепс", "close grip bench", "Штанга", "https://picsum.photos/seed/workout_42/320/220"),
+            BaseExerciseSeed("Отжимания", "Грудь,Трицепс", "push up", null, "https://picsum.photos/seed/workout_43/320/220"),
+            BaseExerciseSeed("Супермен", "Поясница", "superman", null, "https://picsum.photos/seed/workout_44/320/220"),
+            BaseExerciseSeed("Bird dog", "Кор,Поясница", "bird dog", null, "https://picsum.photos/seed/workout_45/320/220"),
+            BaseExerciseSeed("Скакалка", "Кардио", "jump rope", "Скакалка", "https://picsum.photos/seed/workout_46/320/220"),
+            BaseExerciseSeed("Берпи", "Кардио,Ноги", "burpee", null, "https://picsum.photos/seed/workout_47/320/220"),
+            BaseExerciseSeed("Гребля на тренажёре", "Кардио,Спина", "rowing machine", "Кардио", "https://picsum.photos/seed/workout_48/320/220"),
+            BaseExerciseSeed("Спринт на дорожке", "Кардио,Ноги", "treadmill sprint", "Кардио", "https://picsum.photos/seed/workout_49/320/220"),
+            BaseExerciseSeed("Приседания с гантелей", "Квадрицепс,Ягодицы", "goblet squat", "Гантели", "https://picsum.photos/seed/workout_50/320/220"),
+            BaseExerciseSeed("Жим гантелей лёжа", "Грудь,Трицепс", "dumbbell bench press", "Гантели", "https://picsum.photos/seed/workout_51/320/220"),
+            BaseExerciseSeed("Тяга каната к лицу", "Задняя дельта,Спина", "rope face pull", "Кроссовер", "https://picsum.photos/seed/workout_52/320/220"),
+            BaseExerciseSeed("Подъём коленей в планке", "Пресс,Кор", "plank knee tuck", null, "https://picsum.photos/seed/workout_53/320/220"),
+            BaseExerciseSeed("Велосипед", "Пресс", "bicycle crunch", null, "https://picsum.photos/seed/workout_54/320/220"),
+            BaseExerciseSeed("Ходьба выпадами", "Квадрицепс,Ягодицы", "walking lunges", "Гантели", "https://picsum.photos/seed/workout_55/320/220"),
         )
 
         private data class BaseExerciseSeed(
             val name: String,
             val muscles: String,
             val aliases: String?,
-            val equipment: String?
+            val equipment: String?,
+            val photoUri: String
         )
     }
 }
