@@ -328,6 +328,7 @@ fun NutritionScreen(
 
     if (showAddDialog) {
         AddNutritionDialog(
+            viewModel = viewModel,
             onConfirm = { newEntry ->
                 viewModel.addEntry(newEntry)
                 showAddDialog = false
@@ -339,6 +340,7 @@ fun NutritionScreen(
 
     editEntry?.let { entry ->
         AddNutritionDialog(
+            viewModel = viewModel,
             entry = entry,
             onConfirm = { updated ->
                 viewModel.updateEntry(updated)
