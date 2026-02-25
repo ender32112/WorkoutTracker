@@ -111,7 +111,17 @@ fun ImprovedTrainingScreen(trainingViewModel: TrainingViewModel = viewModel()) {
                     onExport = {}
                 )
 
-                TrainingHomeView.CATALOG -> CatalogScreen(items = quick)
+                TrainingHomeView.CATALOG -> CatalogScreen(
+                    items = quick,
+                    onQuickAdd = {
+                        trainingViewModel.addExerciseToActiveWorkout(it)
+                        screen = TrainingHomeView.ACTIVE
+                    },
+                    onStartWorkout = {
+                        trainingViewModel.startWorkout()
+                        screen = TrainingHomeView.ACTIVE
+                    }
+                )
 
                 TrainingHomeView.TEMPLATES -> TrainingTemplatesScreen(
                     templates = templates,
