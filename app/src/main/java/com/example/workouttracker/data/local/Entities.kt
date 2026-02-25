@@ -185,3 +185,59 @@ data class ActiveWorkoutStateEntity(
     val updatedAt: Long,
     val payloadJson: String
 )
+
+@Entity(
+    tableName = "nutrition_entries",
+    foreignKeys = [ForeignKey(
+        entity = UserEntity::class,
+        parentColumns = ["id"],
+        childColumns = ["userId"],
+        onDelete = ForeignKey.CASCADE
+    )],
+    indices = [Index("userId"), Index("dateIso")]
+)
+data class NutritionEntryEntity(
+    @PrimaryKey val id: String,
+    val userId: String,
+    val dateIso: String,
+    val mealType: String,
+    val dishJson: String,
+    val portionWeight: Int,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+@Entity(
+    tableName = "fridge_items",
+    foreignKeys = [ForeignKey(
+        entity = UserEntity::class,
+        parentColumns = ["id"],
+        childColumns = ["userId"],
+        onDelete = ForeignKey.CASCADE
+    )],
+    indices = [Index("userId")]
+)
+data class FridgeItemEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val userId: String,
+    val name: String,
+    val unitType: String,
+    val amount: Int,
+    val calories100: Int,
+    val protein100: Int,
+    val fats100: Int,
+    val carbs100: Int,
+    val barcode: String? = null,
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "product_cache")
+data class ProductCacheEntity(
+    @PrimaryKey val barcode: String,
+    val name: String,
+    val calories100: Int,
+    val protein100: Int,
+    val fats100: Int,
+    val carbs100: Int,
+    val source: String,
+    val cachedAt: Long = System.currentTimeMillis()
+)
