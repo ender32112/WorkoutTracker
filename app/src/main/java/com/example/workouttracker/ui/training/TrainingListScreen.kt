@@ -41,11 +41,7 @@ import coil.compose.rememberAsyncImagePainter
 fun TrainingListScreen(
     sessions: List<TrainingSession>,
     onStartWorkout: () -> Unit,
-    onOpenCatalog: () -> Unit,
-    onOpenTemplates: () -> Unit,
-    onOpenProgress: () -> Unit,
-    onRepeat: (Long) -> Unit,
-    onExport: (Long) -> Unit
+    onRepeat: (Long) -> Unit
 ) {
     val expandedState = remember { mutableStateMapOf<Long, Boolean>() }
 
@@ -62,11 +58,6 @@ fun TrainingListScreen(
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.padding(top = 10.dp, bottom = 4.dp)
                 )
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = onOpenCatalog, modifier = Modifier.weight(1f)) { Text("Каталог") }
-                    TextButton(onClick = onOpenTemplates, modifier = Modifier.weight(1f)) { Text("Шаблоны") }
-                    TextButton(onClick = onOpenProgress, modifier = Modifier.weight(1f)) { Text("Аналитика") }
-                }
             }
 
             items(sessions, key = { it.sessionId }) { session ->
@@ -131,7 +122,6 @@ fun TrainingListScreen(
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 TextButton(onClick = { onRepeat(session.sessionId) }) { Text("Повторить") }
-                                TextButton(onClick = { onExport(session.sessionId) }) { Text("Экспорт") }
                             }
                         }
                     }

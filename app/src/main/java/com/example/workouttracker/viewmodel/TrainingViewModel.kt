@@ -29,6 +29,9 @@ import com.example.workouttracker.ui.training.WorkoutTemplateUi
 import com.google.gson.Gson
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -55,6 +58,8 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
 
     private var timerJob: Job? = null
     private val gson = Gson()
+    private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 8)
+    val messages: SharedFlow<String> = _messages.asSharedFlow()
 
     val allExercises: StateFlow<List<ExerciseCatalogItem>> = dao.observeExercises(userId)
         .map { list -> list.map(::exerciseEntityToUi) }
@@ -128,7 +133,10 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
     ) {
         viewModelScope.launch {
             val safe = name.trim()
-            if (safe.isBlank()) return@launch
+            if (safe.isBlank()) {
+                notify("Введите название упражнения")
+                return@launch
+            }
             dao.upsertExercise(
                 ExerciseEntity(
                     id = id ?: 0,
@@ -142,6 +150,14 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
                     isBase = false
                 )
             )
+            notify("Упражнение сохранено")
+        }
+    }
+
+    fun updateExercisePhoto(exerciseId: Long, photoUri: String?) {
+        viewModelScope.launch {
+            dao.updateExercisePhoto(userId, exerciseId, photoUri)
+            notify("Фото упражнения обновлено")
         }
     }
 
@@ -222,6 +238,7 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
     fun startWorkout() {
         _activeWorkout.value = ActiveWorkoutUiState(startedAt = System.currentTimeMillis())
         persistActiveWorkout()
+        notify("Тренировка начата")
     }
 
     fun addExerciseToActiveWorkout(exercise: ExerciseCatalogItem) {
@@ -233,6 +250,7 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
             )
         )
         persistActiveWorkout()
+        notify("Добавлено: ${exercise.name}")
     }
 
     fun addSet(exerciseId: Long) {
@@ -287,7 +305,7 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
                 val sets = ex.sets.mapNotNull {
                     val w = it.weight.toFloatOrNull()
                     val r = it.reps.toIntOrNull()
-                    if (w == null || r == null) null else PerformedSetDraft(w, r)
+                    if (w == null || r == null || w <= 0f || r <= 0) null else PerformedSetDraft(w, r)
                 }
                 if (sets.isEmpty()) null else PerformedExerciseDraft(ex.exerciseId, ex.exerciseName, sets)
             }
@@ -298,8 +316,10 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
                     finishedAt = System.currentTimeMillis(),
                     exercises = performed
                 )
+                notify("Тренировка сохранена")
             } else {
                 dao.clearActiveWorkoutState(userId)
+                notify("Тренировка не сохранена: добавьте корректные подходы")
             }
             _activeWorkout.value = null
             timerJob?.cancel()
@@ -390,6 +410,11 @@ class TrainingViewModel(application: Application) : AndroidViewModel(application
         isBase = entity.isBase,
         lastUsedAt = entity.lastUsedAt
     )
+
+
+    private fun notify(message: String) {
+        _messages.tryEmit(message)
+    }
 
     companion object {
         fun mapPerformedSessionToUi(

@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.ViewCarousel
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -34,16 +35,23 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -54,6 +62,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.rememberAsyncImagePainter
 import com.example.workouttracker.ui.components.SectionHeader
+import kotlinx.coroutines.flow.collectLatest
 import com.example.workouttracker.viewmodel.TrainingViewModel
 
 private enum class TrainingHomeView { LIST, CATALOG, TEMPLATES, PROGRESS, ACTIVE }
@@ -69,8 +78,16 @@ fun ImprovedTrainingScreen(trainingViewModel: TrainingViewModel = viewModel()) {
     val prMap by trainingViewModel.exercisePrMap.collectAsState()
 
     var screen by remember { mutableStateOf(TrainingHomeView.LIST) }
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(trainingViewModel) {
+        trainingViewModel.messages.collectLatest { message ->
+            snackbarHostState.showSnackbar(message)
+        }
+    }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             SectionHeader(
                 title = "Тренировки",
@@ -101,26 +118,15 @@ fun ImprovedTrainingScreen(trainingViewModel: TrainingViewModel = viewModel()) {
                         trainingViewModel.startWorkout()
                         screen = TrainingHomeView.ACTIVE
                     },
-                    onOpenCatalog = { screen = TrainingHomeView.CATALOG },
-                    onOpenTemplates = { screen = TrainingHomeView.TEMPLATES },
-                    onOpenProgress = { screen = TrainingHomeView.PROGRESS },
                     onRepeat = {
                         trainingViewModel.repeatSession(it)
                         screen = TrainingHomeView.ACTIVE
-                    },
-                    onExport = {}
+                    }
                 )
 
                 TrainingHomeView.CATALOG -> CatalogScreen(
                     items = quick,
-                    onQuickAdd = {
-                        trainingViewModel.addExerciseToActiveWorkout(it)
-                        screen = TrainingHomeView.ACTIVE
-                    },
-                    onStartWorkout = {
-                        trainingViewModel.startWorkout()
-                        screen = TrainingHomeView.ACTIVE
-                    }
+                    onUpdatePhoto = trainingViewModel::updateExercisePhoto
                 )
 
                 TrainingHomeView.TEMPLATES -> TrainingTemplatesScreen(
@@ -161,10 +167,16 @@ fun ImprovedTrainingScreen(trainingViewModel: TrainingViewModel = viewModel()) {
 @Composable
 private fun CatalogScreen(
     items: List<ExerciseCatalogItem>,
-    onQuickAdd: (ExerciseCatalogItem) -> Unit,
-    onStartWorkout: () -> Unit
+    onUpdatePhoto: (Long, String?) -> Unit
 ) {
     var query by remember { mutableStateOf("") }
+    val context = LocalContext.current
+    var imageTargetExerciseId by remember { mutableStateOf<Long?>(null) }
+    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        val targetId = imageTargetExerciseId ?: return@rememberLauncherForActivityResult
+        val persistedPath = uri?.let { persistImageToInternal(context, it) }
+        onUpdatePhoto(targetId, persistedPath)
+    }
     val filtered = remember(items, query) {
         val q = query.trim().lowercase()
         if (q.isBlank()) items else items.filter {
@@ -191,9 +203,14 @@ private fun CatalogScreen(
             ) {
                 item {
                     Text("Каталог упражнений", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text(
+                        "Добавьте фото: нажмите на иконку камеры у упражнения, выберите изображение и оно сохранится в каталоге.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     OutlinedTextField(
                         value = query,
-                        onValueChange = { query = it },
+                        onValueChange = { query = it.take(40) },
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                         label = { Text("Поиск упражнения") },
                         singleLine = true
@@ -232,6 +249,12 @@ private fun CatalogScreen(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(item.name, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                 Text(item.muscles.joinToString(), style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            }
+                            IconButton(onClick = {
+                                imageTargetExerciseId = item.id
+                                photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            }) {
+                                Icon(Icons.Default.PhotoCamera, contentDescription = "Добавить фото")
                             }
                         }
                     }
@@ -306,9 +329,9 @@ private fun WorkoutActiveView(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Button(onClick = { onRest(selectedPreset) }, modifier = Modifier.weight(1f)) { Text("Старт", maxLines = 1) }
-                        TextButton(onClick = onSkipRest, modifier = Modifier.weight(1f)) { Text("Пропустить", maxLines = 1) }
-                        TextButton(onClick = { onRestartRest(selectedPreset) }, modifier = Modifier.weight(1f)) { Text("Перезапуск", maxLines = 1) }
+                        Button(onClick = { onRest(selectedPreset) }, modifier = Modifier.weight(1f)) { Text("Старт") }
+                        TextButton(onClick = onSkipRest, modifier = Modifier.weight(1f)) { Text("Пропустить отдых") }
+                        TextButton(onClick = { onRestartRest(selectedPreset) }, modifier = Modifier.weight(1f)) { Text("Перезапустить таймер") }
                     }
                 }
             }
@@ -345,8 +368,20 @@ private fun WorkoutActiveView(
                     }
                     exercise.sets.forEachIndexed { idx, set ->
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            OutlinedTextField(set.weight, { onSetUpdate(exercise.exerciseId, idx, it, null) }, label = { Text("Вес") }, modifier = Modifier.weight(1f), singleLine = true)
-                            OutlinedTextField(set.reps, { onSetUpdate(exercise.exerciseId, idx, null, it) }, label = { Text("Повторы") }, modifier = Modifier.weight(1f), singleLine = true)
+                            OutlinedTextField(
+                                set.weight,
+                                { value -> onSetUpdate(exercise.exerciseId, idx, value.replace(',', '.').filter { c -> c.isDigit() || c == '.' }.take(6), null) },
+                                label = { Text("Вес") },
+                                modifier = Modifier.weight(1f),
+                                singleLine = true
+                            )
+                            OutlinedTextField(
+                                set.reps,
+                                { value -> onSetUpdate(exercise.exerciseId, idx, null, value.filter(Char::isDigit).take(3)) },
+                                label = { Text("Повторы") },
+                                modifier = Modifier.weight(1f),
+                                singleLine = true
+                            )
                             TextButton(onClick = { onRemoveSet(exercise.exerciseId, idx) }) { Icon(Icons.Default.Delete, null) }
                         }
                     }
