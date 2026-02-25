@@ -56,6 +56,9 @@ interface WorkoutTrackerDao {
     @Query("UPDATE exercise_catalog SET isFavorite = :favorite WHERE id = :exerciseId AND userId = :userId")
     suspend fun updateFavorite(userId: String, exerciseId: Long, favorite: Boolean)
 
+    @Query("UPDATE exercise_catalog SET photoUri = :photoUri WHERE id = :exerciseId AND userId = :userId")
+    suspend fun updateExercisePhoto(userId: String, exerciseId: Long, photoUri: String?)
+
     @Query("UPDATE exercise_catalog SET lastUsedAt = :usedAt WHERE id = :exerciseId AND userId = :userId")
     suspend fun markExerciseUsed(userId: String, exerciseId: Long, usedAt: Long)
 
