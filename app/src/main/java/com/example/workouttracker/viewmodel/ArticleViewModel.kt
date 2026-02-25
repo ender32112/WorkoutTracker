@@ -110,7 +110,7 @@ class ArticleViewModel(
                 // 1 очко за каждые 50 кг суммарного тоннажа за ВСЕ тренировки.
                 // (Можете менять делитель — 50/100/200 — под нужный темп прогресса.)
                 val totalVolume = sessions.sumOf { it.totalVolume } // totalVolume уже = Σ(sets*reps*weight)
-                val earned = (totalVolume / 50).coerceAtLeast(0)     // <- вот тут меняете "50" при желании
+                val earned = (totalVolume / 50).toInt().coerceAtLeast(0)     // <- вот тут меняете "50" при желании
 
                 val spent = prefs.getInt(K_SPENT, 0)
                 _balance.value = (earned - spent).coerceAtLeast(0)

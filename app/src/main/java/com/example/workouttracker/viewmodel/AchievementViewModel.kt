@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.workouttracker.ui.achievements.Achievement
 import kotlinx.coroutines.flow.*
+import kotlin.math.roundToInt
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -26,7 +27,7 @@ class AchievementViewModel(
             // агрегаты
             val totalWorkouts = sessions.size
             val totalReps = sessions.sumOf { it.exercises.sumOf { ex -> ex.sets * ex.reps } }
-            val totalVolume = sessions.sumOf { it.totalVolume }
+            val totalVolume = sessions.sumOf { it.totalVolume }.roundToInt()
             val purchasedArticles = articles.count { it.purchased }
             val (currentStreak, bestStreak) = computeStreak(sessions.map { it.date })
 
