@@ -52,30 +52,32 @@ class OpenFoodFactsRepository(
             .build()
 
         val response = runCatching { httpClient.newCall(request).execute() }.getOrNull() ?: return null
-        if (!response.isSuccessful) return null
+        response.use {
+            if (!it.isSuccessful) return null
 
-        val body = response.body?.string().orEmpty()
-        val root = runCatching { JSONObject(body) }.getOrNull() ?: return null
-        val product = root.optJSONObject("product") ?: return null
-        val nutriments = product.optJSONObject("nutriments") ?: JSONObject()
+            val body = it.body?.string().orEmpty()
+            val root = runCatching { JSONObject(body) }.getOrNull() ?: return null
+            val product = root.optJSONObject("product") ?: return null
+            val nutriments = product.optJSONObject("nutriments") ?: JSONObject()
 
-        val calories = parseEnergyKcal(nutriments)
-        val protein = nutriments.optNullableFloat("proteins_100g")
-        val fats = nutriments.optNullableFloat("fat_100g")
-        val carbs = nutriments.optNullableFloat("carbohydrates_100g")
-        val partial = listOf(calories, protein, fats, carbs).any { it == null }
+            val calories = parseEnergyKcal(nutriments)
+            val protein = nutriments.optNullableFloat("proteins_100g")
+            val fats = nutriments.optNullableFloat("fat_100g")
+            val carbs = nutriments.optNullableFloat("carbohydrates_100g")
+            val partial = listOf(calories, protein, fats, carbs).any { it == null }
 
-        return ProductLookupResult(
-            barcode = barcode,
-            name = product.optString("product_name", "Неизвестный продукт").ifBlank { "Неизвестный продукт" },
-            calories100 = calories,
-            protein100 = protein,
-            fats100 = fats,
-            carbs100 = carbs,
-            source = "open_food_facts_$host",
-            isPartial = partial,
-            isSuspicious = isSuspicious(calories, protein, fats, carbs)
-        )
+            return ProductLookupResult(
+                barcode = barcode,
+                name = product.optString("product_name", "Неизвестный продукт").ifBlank { "Неизвестный продукт" },
+                calories100 = calories,
+                protein100 = protein,
+                fats100 = fats,
+                carbs100 = carbs,
+                source = "open_food_facts_$host",
+                isPartial = partial,
+                isSuspicious = isSuspicious(calories, protein, fats, carbs)
+            )
+        }
     }
 
     private fun parseEnergyKcal(nutriments: JSONObject): Float? {

@@ -278,15 +278,15 @@ class NutritionAiRepository private constructor(context: Context, private val us
             .post(body)
             .build()
 
-        val response = client.newCall(request).execute()
+        val responseText = client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                val errorText = response.body?.string()
+                throw IllegalStateException("Ошибка LLM API: ${response.code} ${response.message} $errorText")
+            }
 
-        if (!response.isSuccessful) {
-            val errorText = response.body?.string()
-            throw IllegalStateException("Ошибка LLM API: ${response.code} ${response.message} $errorText")
+            response.body?.string()
+                ?: throw IllegalStateException("Пустой ответ от LLM API")
         }
-
-        val responseText = response.body?.string()
-            ?: throw IllegalStateException("Пустой ответ от LLM API")
 
         val chatResponse = gson.fromJson(responseText, ChatCompletionResponse::class.java)
 
@@ -528,15 +528,15 @@ class NutritionAiRepository private constructor(context: Context, private val us
         val url = LlmConfig.BASE_URL.trimEnd('/') + "/chat/completions"
 
         val request = Request.Builder().url(url).post(body).build()
-        val response = client.newCall(request).execute()
+        val responseText = client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                val errorText = response.body?.string()
+                throw IllegalStateException("Ошибка LLM API: ${response.code} ${response.message} $errorText")
+            }
 
-        if (!response.isSuccessful) {
-            val errorText = response.body?.string()
-            throw IllegalStateException("Ошибка LLM API: ${response.code} ${response.message} $errorText")
+            response.body?.string()
+                ?: throw IllegalStateException("Пустой ответ от LLM API")
         }
-
-        val responseText = response.body?.string()
-            ?: throw IllegalStateException("Пустой ответ от LLM API")
         android.util.Log.e("LLM_RAW", responseText.take(2000))
 
         val chatResponse = gson.fromJson(responseText, ChatCompletionResponse::class.java)
@@ -625,15 +625,15 @@ class NutritionAiRepository private constructor(context: Context, private val us
             .post(body)
             .build()
 
-        val response = client.newCall(request).execute()
+        val responseText = client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                val errorText = response.body?.string()
+                throw IllegalStateException("Ошибка LLM API: ${response.code} ${response.message} $errorText")
+            }
 
-        if (!response.isSuccessful) {
-            val errorText = response.body?.string()
-            throw IllegalStateException("Ошибка LLM API: ${response.code} ${response.message} $errorText")
+            response.body?.string()
+                ?: throw IllegalStateException("Пустой ответ от LLM API")
         }
-
-        val responseText = response.body?.string()
-            ?: throw IllegalStateException("Пустой ответ от LLM API")
 
         val chatResponse = gson.fromJson(responseText, ChatCompletionResponse::class.java)
 
@@ -731,15 +731,15 @@ class NutritionAiRepository private constructor(context: Context, private val us
             .post(body)
             .build()
 
-        val response = client.newCall(request).execute()
+        val responseText = client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                val errorText = response.body?.string()
+                throw IllegalStateException("Ошибка LLM API: ${response.code} ${response.message} $errorText")
+            }
 
-        if (!response.isSuccessful) {
-            val errorText = response.body?.string()
-            throw IllegalStateException("Ошибка LLM API: ${response.code} ${response.message} $errorText")
+            response.body?.string()
+                ?: throw IllegalStateException("Пустой ответ от LLM API")
         }
-
-        val responseText = response.body?.string()
-            ?: throw IllegalStateException("Пустой ответ от LLM API")
 
         val chatResponse = gson.fromJson(responseText, ChatCompletionResponse::class.java)
 
