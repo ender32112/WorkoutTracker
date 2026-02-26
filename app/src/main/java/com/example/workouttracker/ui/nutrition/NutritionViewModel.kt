@@ -627,9 +627,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 if (!allowExtraProducts && !forceProceed) {
                     val maxCaloriesFromFridge = fridge.sumOf { product ->
                         val available = product.availableGrams ?: 0
-                        available * product.calories100 / 100
+                        available.toDouble() * product.calories100.toDouble() / 100.0
                     }
-                    if (maxCaloriesFromFridge < (adjustedGoal.calories * 0.9).roundToInt()) {
+                    if (maxCaloriesFromFridge < adjustedGoal.calories * 0.9) {
                         _fridgeExtraPrompt.value = FridgeExtraPrompt(fridge)
                         return@launch
                     }
