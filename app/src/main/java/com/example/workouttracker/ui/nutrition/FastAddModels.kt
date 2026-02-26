@@ -3,11 +3,13 @@ package com.example.workouttracker.ui.nutrition
 data class ProductLookupResult(
     val barcode: String,
     val name: String,
-    val calories100: Int,
-    val protein100: Int,
-    val fats100: Int,
-    val carbs100: Int,
-    val source: String
+    val calories100: Float?,
+    val protein100: Float?,
+    val fats100: Float?,
+    val carbs100: Float?,
+    val source: String,
+    val isPartial: Boolean,
+    val isSuspicious: Boolean
 )
 
 enum class QuantityUnit {
@@ -20,9 +22,9 @@ data class FridgeItemUiModel(
     val name: String,
     val unitType: QuantityUnit,
     val amount: Int,
-    val calories100: Int,
-    val protein100: Int,
-    val fats100: Int,
-    val carbs100: Int,
+    val calories100: Float,
+    val protein100: Float,
+    val fats100: Float,
+    val carbs100: Float,
     val barcode: String? = null
 )
