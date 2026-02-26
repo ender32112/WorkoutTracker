@@ -72,16 +72,13 @@ class NutritionAiRepository private constructor(context: Context, private val us
         OkHttpClient.Builder()
             .addInterceptor(logging)
             .addInterceptor { chain ->
-                val builder = chain.request().newBuilder()
+                val newRequest = chain.request().newBuilder()
                     .header("Authorization", "Bearer ${LlmConfig.API_KEY}")
                     .header("Content-Type", "application/json")
-                    .header("X-Title", LlmConfig.APP_TITLE)
-
-                LlmConfig.HTTP_REFERER?.let { referer ->
-                    builder.header("HTTP-Referer", referer)
-                }
-
-                val newRequest = builder.build()
+                    // рекомендовано OpenRouter: идентификатор приложения и сайта
+                    .header("HTTP-Referer", "https://your-app-or-github.com") // можешь указать свой сайт или GitHub
+                    .header("X-Title", "WorkoutTracker Nutrition AI")         // имя приложения
+                    .build()
                 chain.proceed(newRequest)
             }
             .build()
