@@ -14,6 +14,12 @@ fun localProperty(name: String, default: String = ""): String =
 fun String.escapedForBuildConfig(): String =
     replace("\\", "\\\\").replace("\"", "\\\"")
 
+// чтение из local.properties или из env (fallback)
+val fatSecretConsumerKey: String? = (project.findProperty("FATSECRET_CONSUMER_KEY") as? String)
+    ?: System.getenv("FATSECRET_CONSUMER_KEY")
+val fatSecretConsumerSecret: String? = (project.findProperty("FATSECRET_CONSUMER_SECRET") as? String)
+    ?: System.getenv("FATSECRET_CONSUMER_SECRET")
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -38,6 +44,12 @@ android {
 
         buildConfigField("String", "FATSECRET_CLIENT_ID", "\"${localProperty("FATSECRET_CLIENT_ID").escapedForBuildConfig()}\"")
         buildConfigField("String", "FATSECRET_CLIENT_SECRET", "\"${localProperty("FATSECRET_CLIENT_SECRET").escapedForBuildConfig()}\"")
+        fatSecretConsumerKey?.let {
+            buildConfigField("String", "FATSECRET_CONSUMER_KEY", "\"$it\"")
+        }
+        fatSecretConsumerSecret?.let {
+            buildConfigField("String", "FATSECRET_CONSUMER_SECRET", "\"$it\"")
+        }
         buildConfigField("String", "LLM_API_KEY", "\"${localProperty("LLM_API_KEY").escapedForBuildConfig()}\"")
         buildConfigField("String", "LLM_BASE_URL", "\"${localProperty("LLM_BASE_URL", "https://openrouter.ai/api/v1").escapedForBuildConfig()}\"")
         buildConfigField("String", "LLM_MODEL_ID", "\"${localProperty("LLM_MODEL_ID", "openai/gpt-4o-mini").escapedForBuildConfig()}\"")

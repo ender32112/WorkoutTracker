@@ -8,6 +8,7 @@ import com.example.workouttracker.data.local.FridgeItemEntity
 import com.example.workouttracker.data.local.NutritionEntryEntity
 import com.example.workouttracker.data.local.UserEntity
 import com.example.workouttracker.data.local.WorkoutTrackerDatabase
+import com.example.workouttracker.BuildConfig
 import com.example.workouttracker.ui.nutrition.Dish
 import com.example.workouttracker.ui.nutrition.DishIngredient
 import com.example.workouttracker.ui.nutrition.Ingredient
@@ -25,7 +26,6 @@ import com.example.workouttracker.ui.nutrition.QuantityUnit
 import com.example.workouttracker.ui.nutrition.ProductLookupResult
 import com.example.workouttracker.ui.nutrition.OpenFoodFactsRepository
 import com.example.workouttracker.ui.nutrition.FatSecretRepository
-import com.example.workouttracker.ui.nutrition.FatSecretTokenManager
 import com.example.workouttracker.ui.nutrition.ProductRepository
 import com.example.workouttracker.ui.nutrition.FridgeItemUiModel
 import com.example.workouttracker.ui.nutrition_analytic.DailyAnalytics
@@ -54,7 +54,10 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     private val dao = WorkoutTrackerDatabase.getInstance(application).dao()
     private val productRepository = ProductRepository(
         dao = dao,
-        fatSecretRepository = FatSecretRepository(FatSecretTokenManager(application.applicationContext)),
+        fatSecretRepository = FatSecretRepository(
+            consumerKey = BuildConfig.FATSECRET_CONSUMER_KEY,
+            consumerSecret = BuildConfig.FATSECRET_CONSUMER_SECRET
+        ),
         offRepository = OpenFoodFactsRepository(dao)
     )
     private val profileRepository = ProfileRepository(application.applicationContext)
