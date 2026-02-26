@@ -4,7 +4,6 @@ import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
-import org.json.JSONArray
 import org.json.JSONObject
 
 class FatSecretRepository(
@@ -12,20 +11,32 @@ class FatSecretRepository(
     private val consumerSecret: String,
     private val httpClient: OkHttpClient = OkHttpClient()
 ) {
+    private val tag = "FatSecretRepository"
+
     suspend fun lookupProduct(barcode: String): ProductLookupResult? = withContext(Dispatchers.IO) {
         if (consumerKey.isBlank() || consumerSecret.isBlank()) {
-            Log.d("FatSecretRepository", "lookupProduct: consumerKey/consumerSecret is blank")
+            Log.d(tag, "lookupProduct: consumerKey/consumerSecret is blank")
             return@withContext null
         }
 
         lookupWithOAuth1(barcode)
     }
 
+    private suspend fun callFatSecretSafe(apiParams: Map<String, String>): String? = withContext(Dispatchers.IO) {
+        val baseUrl = "https://platform.fatsecret.com/rest/server.api"
+        Log.d(tag, "calling OAuth1FatSecret for method=${apiParams["method"]} params=$apiParams")
+        return@withContext runCatching {
+            OAuth1FatSecret.callFatSecret(httpClient, baseUrl, apiParams, consumerKey, consumerSecret)
+        }.onFailure { e ->
+            Log.d(tag, "callFatSecretSafe: exception for method=${apiParams["method"]}: ${e.message}")
+        }.getOrNull()
+    }
+
     private suspend fun lookupWithOAuth1(barcode: String): ProductLookupResult? {
-        Log.d("FatSecretRepository", "lookupWithOAuth1: start for barcode=$barcode")
+        Log.d(tag, "lookupWithOAuth1: start for barcode=$barcode")
         val productId = getProductIdForBarcode(barcode)
         if (productId == null) {
-            Log.d("FatSecretRepository", "lookupWithOAuth1: no productId for barcode $barcode")
+            Log.d(tag, "lookupWithOAuth1: no productId for barcode $barcode")
             return null
         }
 
@@ -35,30 +46,30 @@ class FatSecretRepository(
             "format" to "json"
         )
 
-        val baseUrl = "https://platform.fatsecret.com/rest/server.api"
-        Log.d("FatSecretRepository", "calling OAuth1FatSecret for method=food.get.v4 productId=$productId")
-        val body = runCatching {
-            OAuth1FatSecret.callFatSecret(httpClient, baseUrl, apiParams, consumerKey, consumerSecret)
-        }.onFailure {
-            Log.d("FatSecretRepository", "lookupWithOAuth1: food.get request failed for productId $productId: ${it.message}")
-        }.getOrNull()
+        Log.d(tag, "calling OAuth1FatSecret for food.get productId=$productId")
+        val body = callFatSecretSafe(apiParams)
 
         if (body.isNullOrEmpty()) {
-            Log.d("FatSecretRepository", "lookupWithOAuth1: empty food.get response for productId $productId")
+            Log.d(tag, "lookupWithOAuth1: empty food.get response for productId $productId")
             return null
         }
 
-        Log.d("FatSecretRepository", "food.get response for productId $productId: $body")
+        Log.d(tag, "food.get response for productId $productId: $body")
 
         val root = runCatching { JSONObject(body) }
             .onFailure {
-                Log.d("FatSecretRepository", "lookupWithOAuth1: failed to parse food.get JSON for productId $productId")
+                Log.d(tag, "lookupWithOAuth1: failed to parse food.get JSON for productId $productId")
             }
             .getOrNull()
             ?: return null
 
+        root.optJSONObject("error")?.optString("message")?.takeIf { it.isNotBlank() }?.let {
+            Log.d(tag, "lookupWithOAuth1: food.get error for productId $productId: $it")
+            return null
+        }
+
         val food = root.optJSONObject("food") ?: run {
-            Log.d("FatSecretRepository", "lookupWithOAuth1: no food object in food.get response for productId $productId")
+            Log.d(tag, "lookupWithOAuth1: no food object in food.get response for productId $productId")
             return null
         }
 
@@ -69,7 +80,7 @@ class FatSecretRepository(
         } else {
             servingsNode?.optJSONObject("serving")
         } ?: run {
-            Log.d("FatSecretRepository", "lookupWithOAuth1: no serving data in food.get response for productId $productId")
+            Log.d(tag, "lookupWithOAuth1: no serving data in food.get response for productId $productId")
             return null
         }
 
@@ -93,77 +104,71 @@ class FatSecretRepository(
     }
 
     private suspend fun getProductIdForBarcode(barcode: String): String? {
-        val apiParams = mapOf(
-            "method" to "food.find_id_for_barcode",
-            "barcode" to barcode,
-            "format" to "json"
+        val tryMethods = listOf(
+            mapOf("method" to "food.find_id_for_barcode", "barcode" to barcode, "format" to "json"),
+            mapOf("method" to "foods.find_id_for_barcode", "barcode" to barcode, "format" to "json"),
+            mapOf("method" to "foods.search", "search_expression" to barcode, "format" to "json"),
+            mapOf("method" to "food.search", "search_expression" to barcode, "format" to "json")
         )
-        val baseUrl = "https://platform.fatsecret.com/rest/server.api"
 
-        Log.d("FatSecretRepository", "calling OAuth1FatSecret for method=food.find_id_for_barcode barcode=$barcode")
-        val body = runCatching {
-            OAuth1FatSecret.callFatSecret(httpClient, baseUrl, apiParams, consumerKey, consumerSecret)
-        }.onFailure {
-            Log.d("FatSecretRepository", "getProductIdForBarcode: request failed for barcode $barcode: ${it.message}")
-        }.getOrNull()
+        for (apiParams in tryMethods) {
+            val method = apiParams["method"] ?: "unknown"
+            val body = callFatSecretSafe(apiParams)
+            if (body.isNullOrEmpty()) {
+                Log.d(tag, "getProductIdForBarcode: empty response for method=$method barcode=$barcode")
+                continue
+            }
 
-        if (body.isNullOrEmpty()) {
-            Log.d("FatSecretRepository", "getProductIdForBarcode: empty response for barcode $barcode")
-            return null
+            Log.d(tag, "find_id_for_barcode response for $barcode (method=$method): $body")
+
+            val root = runCatching { JSONObject(body) }
+                .onFailure {
+                    Log.d(tag, "getProductIdForBarcode: failed to parse JSON for method=$method barcode=$barcode")
+                }
+                .getOrNull()
+                ?: continue
+
+            root.optJSONObject("error")?.optString("message")?.takeIf { it.isNotBlank() }?.let {
+                Log.d(tag, "getProductIdForBarcode method=$method returned error: $it")
+            }
+
+            root.optString("food_id", null)?.takeIf { it.isNotBlank() }?.let { return it }
+            root.optJSONObject("food")?.optString("food_id")?.takeIf { it.isNotBlank() }?.let { return it }
+
+            root.optJSONObject("foods")?.optJSONArray("food")?.let { arr ->
+                if (arr.length() > 0) {
+                    arr.optJSONObject(0)?.optString("food_id")?.takeIf { it.isNotBlank() }?.let { return it }
+                    arr.optJSONObject(0)?.optString("id")?.takeIf { it.isNotBlank() }?.let { return it }
+                }
+            }
+
+            root.optJSONObject("foods")?.optJSONObject("food")?.optString("food_id")
+                ?.takeIf { it.isNotBlank() }
+                ?.let { return it }
+
+            scanForFoodId(root)?.let { return it }
         }
 
-        Log.d("FatSecretRepository", "find_id_for_barcode response for $barcode: $body")
-
-        val root = runCatching { JSONObject(body) }
-            .onFailure {
-                Log.d("FatSecretRepository", "getProductIdForBarcode: failed to parse JSON for barcode $barcode")
-            }
-            .getOrNull()
-            ?: return null
-
-        root.optString("food_id", null)?.takeIf { it.isNotBlank() }?.let { return it }
-        root.optJSONObject("food")?.optString("food_id")?.takeIf { it.isNotBlank() }?.let { return it }
-
-        root.optJSONObject("foods")?.optJSONArray("food")?.let { arr ->
-            if (arr.length() > 0) {
-                arr.optJSONObject(0)?.optString("food_id")?.takeIf { it.isNotBlank() }?.let { return it }
-            }
-        }
-
-        root.optJSONObject("foods")?.optJSONObject("food")?.optString("food_id")
-            ?.takeIf { it.isNotBlank() }
-            ?.let { return it }
-
-        findFoodIdInNode(root)?.let { return it }
-
-        Log.d("FatSecretRepository", "no food_id found in find_id_for_barcode response for $barcode")
+        Log.d(tag, "getProductIdForBarcode: no food_id found in any response for $barcode")
         return null
     }
 
-    private fun findFoodIdInNode(node: Any?): String? {
-        return when (node) {
-            is JSONObject -> {
-                node.optString("food_id", null)?.takeIf { it.isNotBlank() }
-                    ?: findFoodIdInNode(node.opt("food"))
-                    ?: findFoodIdInNode(node.opt("foods"))
-                    ?: run {
-                        val keys = node.keys()
-                        while (keys.hasNext()) {
-                            val key = keys.next()
-                            findFoodIdInNode(node.opt(key))?.let { return it }
-                        }
-                        null
+    private fun scanForFoodId(root: JSONObject): String? {
+        val keys = root.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            val node = root.opt(key)
+            if (node is JSONObject) {
+                node.optString("food_id", null)?.takeIf { it.isNotBlank() }?.let { return it }
+                node.optJSONObject("food")?.optString("food_id")?.takeIf { it.isNotBlank() }?.let { return it }
+                node.optJSONArray("food")?.let { arr ->
+                    if (arr.length() > 0) {
+                        arr.optJSONObject(0)?.optString("food_id")?.takeIf { it.isNotBlank() }?.let { return it }
+                        arr.optJSONObject(0)?.optString("id")?.takeIf { it.isNotBlank() }?.let { return it }
                     }
-            }
-
-            is JSONArray -> {
-                for (index in 0 until node.length()) {
-                    findFoodIdInNode(node.opt(index))?.let { return it }
                 }
-                null
             }
-
-            else -> null
         }
+        return null
     }
 }
