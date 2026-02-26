@@ -680,7 +680,7 @@ fun AddNutritionDialog(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(product.name, style = MaterialTheme.typography.titleMedium)
                     Text("Штрихкод: ${product.barcode}")
-                    Text("На 100 г: ${product.calories100} ккал, Б ${product.protein100} г, Ж ${product.fats100} г, У ${product.carbs100} г")
+                    Text("На 100 г: ${"%.1f".format(product.calories100 ?: 0f)} ккал, Б ${"%.1f".format(product.protein100 ?: 0f)} г, Ж ${"%.1f".format(product.fats100 ?: 0f)} г, У ${"%.1f".format(product.carbs100 ?: 0f)} г")
 
                     OutlinedTextField(
                         value = dishName,

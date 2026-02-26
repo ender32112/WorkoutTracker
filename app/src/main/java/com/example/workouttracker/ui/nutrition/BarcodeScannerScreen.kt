@@ -1,5 +1,6 @@
 package com.example.workouttracker.ui.nutrition
 
+import android.os.SystemClock
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
@@ -11,18 +12,19 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -31,11 +33,16 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
+import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicBoolean
+
+private const val THROTTLE_MS = 220L
+private const val STREAK_TARGET = 3
+private const val STREAK_TIMEOUT_MS = 1500L
 
 @Composable
 fun BarcodeScannerScreen(
@@ -45,12 +52,26 @@ fun BarcodeScannerScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
-    val scanner = remember { BarcodeScanning.getClient() }
+    val scanner = remember {
+        BarcodeScanning.getClient(
+            BarcodeScannerOptions.Builder()
+                .setBarcodeFormats(
+                    Barcode.FORMAT_EAN_13,
+                    Barcode.FORMAT_EAN_8,
+                    Barcode.FORMAT_UPC_A,
+                    Barcode.FORMAT_UPC_E
+                )
+                .build()
+        )
+    }
     val cameraExecutor: ExecutorService = remember { Executors.newSingleThreadExecutor() }
 
+    var lastAnalyzedAt by remember { mutableStateOf(0L) }
+    var streakValue by remember { mutableStateOf<String?>(null) }
+    var streakCount by remember { mutableStateOf(0) }
+    var streakAt by remember { mutableStateOf(0L) }
+    var progress by remember { mutableFloatStateOf(0f) }
     var hasDetected by remember { mutableStateOf(false) }
-    var isProcessingFrame by remember { mutableStateOf(false) }
-    val detectionLock = remember { AtomicBoolean(false) }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -79,33 +100,50 @@ fun BarcodeScannerScreen(
                         .build()
 
                     imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
+                        val now = SystemClock.elapsedRealtime()
+                        if (now - lastAnalyzedAt < THROTTLE_MS || hasDetected) {
+                            imageProxy.close(); return@setAnalyzer
+                        }
+                        lastAnalyzedAt = now
+
                         val mediaImage = imageProxy.image
-                        if (mediaImage == null || detectionLock.get() || isProcessingFrame) {
-                            imageProxy.close()
-                            return@setAnalyzer
+                        if (mediaImage == null) {
+                            imageProxy.close(); return@setAnalyzer
                         }
 
-                        isProcessingFrame = true
                         val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
+                        val frameWidth = image.width
 
                         scanner.process(image)
                             .addOnSuccessListener { barcodes ->
-                                val code = BarcodeScannerParser.extractCode(barcodes)
-                                if (!code.isNullOrBlank() && detectionLock.compareAndSet(false, true)) {
-                                    mainExecutor.execute {
-                                        hasDetected = true
-                                        cameraProvider.unbindAll()
-                                        onDetected(code)
-                                    }
+                                val candidate = barcodes.firstNotNullOfOrNull { barcode ->
+                                    val bbox = barcode.boundingBox ?: return@firstNotNullOfOrNull null
+                                    if (bbox.width() < frameWidth * 0.30f) return@firstNotNullOfOrNull null
+                                    BarcodeScannerParser.normalize(barcode.rawValue)
+                                }
+
+                                if (candidate == null) {
+                                    streakCount = 0
+                                    progress = 0f
+                                    return@addOnSuccessListener
+                                }
+
+                                if (streakValue == candidate && now - streakAt <= STREAK_TIMEOUT_MS) {
+                                    streakCount += 1
+                                } else {
+                                    streakValue = candidate
+                                    streakCount = 1
+                                }
+                                streakAt = now
+                                progress = (streakCount.toFloat() / STREAK_TARGET).coerceIn(0f, 1f)
+
+                                if (streakCount >= STREAK_TARGET) {
+                                    hasDetected = true
+                                    cameraProvider.unbindAll()
+                                    onDetected(candidate)
                                 }
                             }
-                            .addOnFailureListener {
-                                // Ошибки сканирования не блокируют следующий кадр
-                            }
-                            .addOnCompleteListener {
-                                isProcessingFrame = false
-                                imageProxy.close()
-                            }
+                            .addOnCompleteListener { imageProxy.close() }
                     }
 
                     cameraProvider.unbindAll()
@@ -126,9 +164,7 @@ fun BarcodeScannerScreen(
                 runCatching { cameraProviderFuture.get().unbindAll() }
                 onClose()
             },
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(12.dp)
+            modifier = Modifier.align(Alignment.TopEnd).padding(12.dp)
         ) {
             Icon(Icons.Filled.Close, contentDescription = "Закрыть сканер")
         }
@@ -142,9 +178,7 @@ fun BarcodeScannerScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            if (isProcessingFrame && !hasDetected) {
-                CircularProgressIndicator()
-            }
+            LinearProgressIndicator(progress = { progress })
             Text("Наведите камеру на штрихкод")
         }
     }

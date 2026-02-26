@@ -40,10 +40,10 @@ class OpenFoodFactsRepositoryTest {
             ProductCacheEntity(
                 barcode = barcode,
                 name = "Тестовый продукт",
-                calories100 = 250,
-                protein100 = 8,
-                fats100 = 10,
-                carbs100 = 20,
+                calories100 = 250f,
+                protein100 = 8f,
+                fats100 = 10f,
+                carbs100 = 20f,
                 source = "cache"
             )
         )
@@ -58,7 +58,7 @@ class OpenFoodFactsRepositoryTest {
         val result = repository.lookupByBarcode(barcode)
 
         assertEquals("Тестовый продукт", result?.name)
-        assertEquals(250, result?.calories100)
+        assertEquals(250f, result?.calories100)
         assertEquals("cache", result?.source)
     }
 

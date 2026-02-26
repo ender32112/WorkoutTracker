@@ -222,10 +222,10 @@ data class FridgeItemEntity(
     val name: String,
     val unitType: String,
     val amount: Int,
-    val calories100: Int,
-    val protein100: Int,
-    val fats100: Int,
-    val carbs100: Int,
+    val calories100: Float,
+    val protein100: Float,
+    val fats100: Float,
+    val carbs100: Float,
     val barcode: String? = null,
     val updatedAt: Long = System.currentTimeMillis()
 )
@@ -234,10 +234,10 @@ data class FridgeItemEntity(
 data class ProductCacheEntity(
     @PrimaryKey val barcode: String,
     val name: String,
-    val calories100: Int,
-    val protein100: Int,
-    val fats100: Int,
-    val carbs100: Int,
+    val calories100: Float,
+    val protein100: Float,
+    val fats100: Float,
+    val carbs100: Float,
     val source: String,
     val cachedAt: Long = System.currentTimeMillis()
 )
