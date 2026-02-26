@@ -4,6 +4,7 @@ import android.os.SystemClock
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
+import androidx.camera.core.CameraInfoUnavailableException
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
@@ -47,6 +48,7 @@ private const val STREAK_TIMEOUT_MS = 1500L
 @Composable
 fun BarcodeScannerScreen(
     onDetected: (String) -> Unit,
+    onError: (String) -> Unit,
     onClose: () -> Unit
 ) {
     val context = LocalContext.current
@@ -89,7 +91,11 @@ fun BarcodeScannerScreen(
                 val mainExecutor = ContextCompat.getMainExecutor(ctx)
 
                 cameraProviderFuture.addListener({
-                    val cameraProvider = cameraProviderFuture.get()
+                    val cameraProvider = runCatching { cameraProviderFuture.get() }
+                        .getOrElse {
+                            onError("Не удалось инициализировать камеру: ${it.message.orEmpty()}")
+                            return@addListener
+                        }
 
                     val preview = Preview.Builder().build().also {
                         it.surfaceProvider = previewView.surfaceProvider
@@ -143,16 +149,30 @@ fun BarcodeScannerScreen(
                                     onDetected(candidate)
                                 }
                             }
+                            .addOnFailureListener {
+                                streakCount = 0
+                                progress = 0f
+                                onError("Ошибка распознавания штрихкода: ${it.message.orEmpty()}")
+                            }
                             .addOnCompleteListener { imageProxy.close() }
                     }
 
-                    cameraProvider.unbindAll()
-                    cameraProvider.bindToLifecycle(
-                        lifecycleOwner,
-                        CameraSelector.DEFAULT_BACK_CAMERA,
-                        preview,
-                        imageAnalysis
-                    )
+                    runCatching {
+                        cameraProvider.unbindAll()
+                        cameraProvider.bindToLifecycle(
+                            lifecycleOwner,
+                            CameraSelector.DEFAULT_BACK_CAMERA,
+                            preview,
+                            imageAnalysis
+                        )
+                    }.onFailure {
+                        val message = if (it is CameraInfoUnavailableException) {
+                            "Камера недоступна на этом устройстве"
+                        } else {
+                            "Не удалось запустить камеру: ${it.message.orEmpty()}"
+                        }
+                        onError(message)
+                    }
                 }, mainExecutor)
 
                 previewView
