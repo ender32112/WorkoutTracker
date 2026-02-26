@@ -157,28 +157,28 @@ fun FridgeDialog(
                                 )
                                 OutlinedTextField(
                                     value = product.calories100,
-                                    onValueChange = { products[index] = products[index].copy(calories100 = it.filter { ch -> ch.isDigit() }) },
+                                    onValueChange = { products[index] = products[index].copy(calories100 = it.filter { ch -> ch.isDigit() || ch == '.' || ch == ',' }) },
                                     label = { Text("Ккал / 100 г") },
                                     modifier = Modifier.fillMaxWidth(),
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                                 )
                                 OutlinedTextField(
                                     value = product.protein100,
-                                    onValueChange = { products[index] = products[index].copy(protein100 = it.filter { ch -> ch.isDigit() }) },
+                                    onValueChange = { products[index] = products[index].copy(protein100 = it.filter { ch -> ch.isDigit() || ch == '.' || ch == ',' }) },
                                     label = { Text("Белки / 100 г") },
                                     modifier = Modifier.fillMaxWidth(),
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                                 )
                                 OutlinedTextField(
                                     value = product.fats100,
-                                    onValueChange = { products[index] = products[index].copy(fats100 = it.filter { ch -> ch.isDigit() }) },
+                                    onValueChange = { products[index] = products[index].copy(fats100 = it.filter { ch -> ch.isDigit() || ch == '.' || ch == ',' }) },
                                     label = { Text("Жиры / 100 г") },
                                     modifier = Modifier.fillMaxWidth(),
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                                 )
                                 OutlinedTextField(
                                     value = product.carbs100,
-                                    onValueChange = { products[index] = products[index].copy(carbs100 = it.filter { ch -> ch.isDigit() }) },
+                                    onValueChange = { products[index] = products[index].copy(carbs100 = it.filter { ch -> ch.isDigit() || ch == '.' || ch == ',' }) },
                                     label = { Text("Углеводы / 100 г") },
                                     modifier = Modifier.fillMaxWidth(),
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
@@ -207,10 +207,10 @@ fun FridgeDialog(
                 val fridge = products
                     .mapNotNull { ui ->
                         val name = ui.name.trim()
-                        val calories = ui.calories100.toIntOrNull()
-                        val protein = ui.protein100.toIntOrNull()
-                        val fats = ui.fats100.toIntOrNull()
-                        val carbs = ui.carbs100.toIntOrNull()
+                        val calories = ui.calories100.replace(',', '.').toFloatOrNull()
+                        val protein = ui.protein100.replace(',', '.').toFloatOrNull()
+                        val fats = ui.fats100.replace(',', '.').toFloatOrNull()
+                        val carbs = ui.carbs100.replace(',', '.').toFloatOrNull()
                         if (name.isBlank() || calories == null || protein == null || fats == null || carbs == null) return@mapNotNull null
                         FridgeProduct(
                             name = name,

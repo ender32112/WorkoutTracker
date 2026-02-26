@@ -53,17 +53,29 @@ data class NutritionEntry(
     val dish: Dish,
     val portionWeight: Int
 ) {
+    val caloriesFloat: Float
+        get() = dish.caloriesPer100g * portionWeight / 100f
+
+    val proteinFloat: Float
+        get() = dish.proteinPer100g * portionWeight / 100f
+
+    val fatsFloat: Float
+        get() = dish.fatsPer100g * portionWeight / 100f
+
+    val carbsFloat: Float
+        get() = dish.carbsPer100g * portionWeight / 100f
+
     val calories: Int
-        get() = (dish.caloriesPer100g * portionWeight / 100f).roundToInt()
+        get() = caloriesFloat.roundToInt()
 
     val protein: Int
-        get() = (dish.proteinPer100g * portionWeight / 100f).roundToInt()
+        get() = proteinFloat.roundToInt()
 
     val fats: Int
-        get() = (dish.fatsPer100g * portionWeight / 100f).roundToInt()
+        get() = fatsFloat.roundToInt()
 
     val carbs: Int
-        get() = (dish.carbsPer100g * portionWeight / 100f).roundToInt()
+        get() = carbsFloat.roundToInt()
 
     val name: String
         get() = dish.name

@@ -24,6 +24,9 @@ import com.example.workouttracker.ui.nutrition.FridgeProduct
 import com.example.workouttracker.ui.nutrition.QuantityUnit
 import com.example.workouttracker.ui.nutrition.ProductLookupResult
 import com.example.workouttracker.ui.nutrition.OpenFoodFactsRepository
+import com.example.workouttracker.ui.nutrition.FatSecretRepository
+import com.example.workouttracker.ui.nutrition.FatSecretTokenManager
+import com.example.workouttracker.ui.nutrition.ProductRepository
 import com.example.workouttracker.ui.nutrition.FridgeItemUiModel
 import com.example.workouttracker.ui.nutrition_analytic.DailyAnalytics
 import com.example.workouttracker.ui.nutrition_analytic.FoodRating
@@ -49,7 +52,11 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     private val userId = authPrefs.getString(AuthViewModel.KEY_CURRENT_USER_ID, null) ?: "guest"
     private val prefs = application.getSharedPreferences("nutrition_prefs_" + userId, Context.MODE_PRIVATE)
     private val dao = WorkoutTrackerDatabase.getInstance(application).dao()
-    private val productRepository = OpenFoodFactsRepository(dao)
+    private val productRepository = ProductRepository(
+        dao = dao,
+        fatSecretRepository = FatSecretRepository(FatSecretTokenManager(application.applicationContext)),
+        offRepository = OpenFoodFactsRepository(dao)
+    )
     private val profileRepository = ProfileRepository(application.applicationContext)
     private val nutritionAiRepository = NutritionAiRepository.getInstance(application.applicationContext, userId)
     private val behaviorRepository = BehaviorPreferencesRepository(application.applicationContext, userId)
@@ -490,11 +497,11 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             _lookupError.value = null
             _lookupProduct.value = null
-            val result = productRepository.lookupByBarcode(code)
+            val result = productRepository.lookup(code)
             if (result != null) {
                 _lookupProduct.value = result
             } else {
-                _lookupError.value = "Продукт не найден в кэше и Open Food Facts"
+                _lookupError.value = "Продукт не найден в кэше/FatSecret/Open Food Facts"
             }
         }
     }
@@ -519,10 +526,10 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                     DishIngredient(
                         ingredient = Ingredient(
                             name = product.name,
-                            caloriesPer100g = product.calories100.toFloat(),
-                            proteinPer100g = product.protein100.toFloat(),
-                            fatsPer100g = product.fats100.toFloat(),
-                            carbsPer100g = product.carbs100.toFloat()
+                            caloriesPer100g = product.calories100 ?: 0f,
+                            proteinPer100g = product.protein100 ?: 0f,
+                            fatsPer100g = product.fats100 ?: 0f,
+                            carbsPer100g = product.carbs100 ?: 0f
                         ),
                         weightInDish = grams
                     )
@@ -540,10 +547,10 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                     name = product.name,
                     unitType = unit.name,
                     amount = amount,
-                    calories100 = product.calories100,
-                    protein100 = product.protein100,
-                    fats100 = product.fats100,
-                    carbs100 = product.carbs100,
+                    calories100 = product.calories100 ?: 0f,
+                    protein100 = product.protein100 ?: 0f,
+                    fats100 = product.fats100 ?: 0f,
+                    carbs100 = product.carbs100 ?: 0f,
                     barcode = product.barcode
                 )
             )
