@@ -1,3 +1,19 @@
+import java.util.Properties
+
+
+val localProperties = Properties().apply {
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        localPropertiesFile.inputStream().use { load(it) }
+    }
+}
+
+fun localProperty(name: String, default: String = ""): String =
+    localProperties.getProperty(name)?.trim().takeUnless { it.isNullOrEmpty() } ?: default
+
+fun String.escapedForBuildConfig(): String =
+    replace("\\", "\\\\").replace("\"", "\\\"")
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -19,6 +35,14 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField("String", "FATSECRET_CLIENT_ID", "\"${localProperty("FATSECRET_CLIENT_ID").escapedForBuildConfig()}\"")
+        buildConfigField("String", "FATSECRET_CLIENT_SECRET", "\"${localProperty("FATSECRET_CLIENT_SECRET").escapedForBuildConfig()}\"")
+        buildConfigField("String", "LLM_API_KEY", "\"${localProperty("LLM_API_KEY").escapedForBuildConfig()}\"")
+        buildConfigField("String", "LLM_BASE_URL", "\"${localProperty("LLM_BASE_URL", "https://openrouter.ai/api/v1").escapedForBuildConfig()}\"")
+        buildConfigField("String", "LLM_MODEL_ID", "\"${localProperty("LLM_MODEL_ID", "openai/gpt-4o-mini").escapedForBuildConfig()}\"")
+        buildConfigField("String", "LLM_HTTP_REFERER", "\"${localProperty("LLM_HTTP_REFERER").escapedForBuildConfig()}\"")
+        buildConfigField("String", "LLM_APP_TITLE", "\"${localProperty("LLM_APP_TITLE", "WorkoutTracker Nutrition AI").escapedForBuildConfig()}\"")
 
         vectorDrawables {
             useSupportLibrary = true
@@ -43,6 +67,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

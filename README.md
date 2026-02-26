@@ -247,6 +247,20 @@ WorkoutTracker — Android-приложение на **Kotlin + Jetpack Compose*
 README описывает **фактическое поведение текущей реализации** в ветке проекта и может меняться по мере развития функционала.
 
 
+
+## 🔐 Настройка FatSecret (локально, без коммита)
+
+Ваши данные со скриншота (`Client ID` и `Client Secret`) нужно добавить в файл `local.properties` в корне проекта:
+
+```properties
+FATSECRET_CLIENT_ID=your_client_id
+FATSECRET_CLIENT_SECRET=your_client_secret
+```
+
+Эти значения автоматически попадают в `BuildConfig` и используются в `FatSecretTokenManager`, если в `SharedPreferences` ещё нет сохранённых credentials.
+
+> Не храните реальные ключи в git. Если ключи уже публиковались, обязательно перевыпустите их в кабинете FatSecret.
+
 ## ✅ Как протестировать сканирование штрихкодов
 
 1. Откройте раздел **Питание** и нажмите **+** для добавления приёма пищи.

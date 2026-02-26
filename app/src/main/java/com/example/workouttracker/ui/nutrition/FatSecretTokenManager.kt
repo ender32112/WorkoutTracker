@@ -2,6 +2,7 @@ package com.example.workouttracker.ui.nutrition
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.example.workouttracker.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
@@ -24,8 +25,10 @@ class FatSecretTokenManager(
             return@withContext token
         }
 
-        val clientId = prefs.getString(KEY_CLIENT_ID, null)
-        val clientSecret = prefs.getString(KEY_CLIENT_SECRET, null)
+        val clientId = prefs.getString(KEY_CLIENT_ID, null)?.takeIf { it.isNotBlank() }
+            ?: BuildConfig.FATSECRET_CLIENT_ID.takeIf { it.isNotBlank() }
+        val clientSecret = prefs.getString(KEY_CLIENT_SECRET, null)?.takeIf { it.isNotBlank() }
+            ?: BuildConfig.FATSECRET_CLIENT_SECRET.takeIf { it.isNotBlank() }
         if (clientId.isNullOrBlank() || clientSecret.isNullOrBlank()) return@withContext null
 
         val form = FormBody.Builder()
