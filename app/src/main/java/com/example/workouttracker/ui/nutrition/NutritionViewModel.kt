@@ -500,11 +500,12 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             _lookupError.value = null
             _lookupProduct.value = null
-            val result = productRepository.lookup(code)
-            if (result != null) {
-                _lookupProduct.value = result
+            val response = productRepository.lookup(code)
+            if (response.product != null) {
+                _lookupProduct.value = response.product
             } else {
-                _lookupError.value = "Продукт не найден в кэше/FatSecret/Open Food Facts"
+                _lookupError.value = response.errorMessage
+                    ?: "Продукт не найден в кэше/FatSecret/Open Food Facts"
             }
         }
     }

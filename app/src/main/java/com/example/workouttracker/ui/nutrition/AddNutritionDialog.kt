@@ -83,6 +83,7 @@ fun AddNutritionDialog(
     var showScanner by remember { mutableStateOf(false) }
     var showCameraDeniedHint by remember { mutableStateOf(false) }
     var isLookupLoading by remember { mutableStateOf(false) }
+    var scannerError by remember { mutableStateOf<String?>(null) }
 
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -649,9 +650,26 @@ fun AddNutritionDialog(
                     showScanner = false
                     viewModel.lookupBarcode(barcode)
                 },
+                onError = { message ->
+                    showScanner = false
+                    scannerError = message
+                },
                 onClose = { showScanner = false }
             )
         }
+    }
+
+    scannerError?.let { message ->
+        AlertDialog(
+            onDismissRequest = { scannerError = null },
+            title = { Text("Ошибка сканера") },
+            text = { Text(message) },
+            confirmButton = {
+                TextButton(onClick = { scannerError = null }) {
+                    Text("Ок")
+                }
+            }
+        )
     }
 
 

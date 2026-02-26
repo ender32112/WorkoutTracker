@@ -8,24 +8,32 @@ class ProductRepository(
     private val fatSecretRepository: FatSecretRepository,
     private val offRepository: OpenFoodFactsRepository
 ) {
-    suspend fun lookup(barcode: String): ProductLookupResult? {
+    suspend fun lookup(barcode: String): ProductLookupResponse {
         dao.getCachedProductByBarcode(barcode)?.let {
-            return ProductLookupResult(
-                barcode = barcode,
-                name = it.name,
-                calories100 = it.calories100,
-                protein100 = it.protein100,
-                fats100 = it.fats100,
-                carbs100 = it.carbs100,
-                source = it.source,
-                isPartial = false,
-                isSuspicious = false
+            return ProductLookupResponse(
+                product = ProductLookupResult(
+                    barcode = barcode,
+                    name = it.name,
+                    calories100 = it.calories100,
+                    protein100 = it.protein100,
+                    fats100 = it.fats100,
+                    carbs100 = it.carbs100,
+                    source = it.source,
+                    isPartial = false,
+                    isSuspicious = false
+                )
             )
         }
 
-        val fatSecret = fatSecretRepository.lookupProduct(barcode)
+        val fatSecretAttempt = fatSecretRepository.lookupProduct(barcode)
+        val fatSecret = fatSecretAttempt.data
         val off = offRepository.lookupByBarcode(barcode)
-        val merged = merge(fatSecret, off) ?: return null
+        val merged = merge(fatSecret, off)
+        if (merged == null) {
+            val offError = "Open Food Facts не вернул результат"
+            val fatSecretError = fatSecretAttempt.error ?: "FatSecret не вернул результат"
+            return ProductLookupResponse(errorMessage = "$fatSecretError. $offError")
+        }
 
         dao.upsertCachedProduct(
             ProductCacheEntity(
@@ -38,7 +46,7 @@ class ProductRepository(
                 source = merged.source
             )
         )
-        return merged
+        return ProductLookupResponse(product = merged)
     }
 
     private fun merge(primary: ProductLookupResult?, fallback: ProductLookupResult?): ProductLookupResult? {
