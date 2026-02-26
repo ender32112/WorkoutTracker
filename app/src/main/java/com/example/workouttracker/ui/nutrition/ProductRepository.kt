@@ -25,14 +25,11 @@ class ProductRepository(
             )
         }
 
-        val fatSecretAttempt = fatSecretRepository.lookupProduct(barcode)
-        val fatSecret = fatSecretAttempt.data
+        val fatSecret = fatSecretRepository.lookupProduct(barcode)
         val off = offRepository.lookupByBarcode(barcode)
         val merged = merge(fatSecret, off)
         if (merged == null) {
-            val offError = "Open Food Facts не вернул результат"
-            val fatSecretError = fatSecretAttempt.error ?: "FatSecret не вернул результат"
-            return ProductLookupResponse(errorMessage = "$fatSecretError. $offError")
+            return ProductLookupResponse(errorMessage = "FatSecret и Open Food Facts не вернули результат")
         }
 
         dao.upsertCachedProduct(
