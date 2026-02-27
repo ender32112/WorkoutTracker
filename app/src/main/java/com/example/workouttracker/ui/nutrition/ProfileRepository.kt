@@ -2,6 +2,7 @@ package com.example.workouttracker.ui.nutrition
 
 import android.content.Context
 import org.json.JSONArray
+import org.json.JSONObject
 
 class ProfileRepository(context: Context) {
     private val prefs = context.getSharedPreferences("nutrition_profile_prefs", Context.MODE_PRIVATE)
@@ -24,6 +25,7 @@ class ProfileRepository(context: Context) {
             heightCm = heightCm,
             weightKg = weightKg,
             goal = goal,
+            dietSettings = readDietSettings(),
             favoriteIngredients = readStringList(KEY_FAVORITES),
             dislikedIngredients = readStringList(KEY_DISLIKED),
             allergies = readStringList(KEY_ALLERGIES)
@@ -34,6 +36,7 @@ class ProfileRepository(context: Context) {
         prefs.edit()
             .putString(KEY_SEX, profile.sex.name)
             .putString(KEY_GOAL, profile.goal.name)
+            .putString(KEY_DIET_SETTINGS, profile.dietSettings?.let { toDietJson(it) })
             .putInt(KEY_AGE, profile.age)
             .putInt(KEY_HEIGHT, profile.heightCm)
             .putFloat(KEY_WEIGHT, profile.weightKg)
@@ -41,6 +44,35 @@ class ProfileRepository(context: Context) {
             .putString(KEY_DISLIKED, JSONArray(profile.dislikedIngredients).toString())
             .putString(KEY_ALLERGIES, JSONArray(profile.allergies).toString())
             .apply()
+    }
+
+
+    private fun readDietSettings(): DietSettings? {
+        val raw = prefs.getString(KEY_DIET_SETTINGS, null) ?: return null
+        return runCatching {
+            val obj = JSONObject(raw)
+            DietSettings(
+                calories = obj.optInt("calories", 0),
+                protein = obj.optInt("protein", 0),
+                fats = obj.optInt("fats", 0),
+                carbs = obj.optInt("carbs", 0),
+                excludeOrLimit = obj.optString("excludeOrLimit", ""),
+                increase = obj.optString("increase", ""),
+                additionalRecommendations = obj.optString("additionalRecommendations", "")
+            )
+        }.getOrNull()?.takeIf { it.calories > 0 }
+    }
+
+    private fun toDietJson(diet: DietSettings): String {
+        return JSONObject().apply {
+            put("calories", diet.calories)
+            put("protein", diet.protein)
+            put("fats", diet.fats)
+            put("carbs", diet.carbs)
+            put("excludeOrLimit", diet.excludeOrLimit)
+            put("increase", diet.increase)
+            put("additionalRecommendations", diet.additionalRecommendations)
+        }.toString()
     }
 
     private fun readStringList(key: String): List<String> {
@@ -65,5 +97,6 @@ class ProfileRepository(context: Context) {
         private const val KEY_FAVORITES = "favoriteIngredients"
         private const val KEY_DISLIKED = "dislikedIngredients"
         private const val KEY_ALLERGIES = "allergies"
+        private const val KEY_DIET_SETTINGS = "dietSettings"
     }
 }

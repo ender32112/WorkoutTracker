@@ -796,6 +796,7 @@ class NutritionAiRepository private constructor(context: Context, private val us
         Goal.LOSE_WEIGHT -> "похудение"
         Goal.MAINTAIN_WEIGHT -> "поддержание веса"
         Goal.GAIN_WEIGHT -> "набор веса"
+        Goal.DIET -> "диета"
     }
 
     companion object {

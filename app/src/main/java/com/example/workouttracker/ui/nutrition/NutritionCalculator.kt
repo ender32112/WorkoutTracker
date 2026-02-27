@@ -25,21 +25,20 @@ object NutritionCalculator {
             Goal.LOSE_WEIGHT -> maintenanceCalories * 0.85f
             Goal.MAINTAIN_WEIGHT -> maintenanceCalories
             Goal.GAIN_WEIGHT -> maintenanceCalories * 1.12f
+            Goal.DIET -> profile.dietSettings?.calories?.toFloat() ?: maintenanceCalories * 0.9f
         }
         val calories = adjustedCalories.roundToInt()
 
-        val proteinGrams = (profile.weightKg * PROTEIN_PER_KG).roundToInt()
-        val fatsGrams = (profile.weightKg * FATS_PER_KG).roundToInt()
-        val caloriesFromProtein = proteinGrams * 4
-        val caloriesFromFats = fatsGrams * 9
-        val carbsCalories = (calories - caloriesFromProtein - caloriesFromFats).coerceAtLeast(0)
-        val carbsGrams = (carbsCalories / 4f).roundToInt()
+        val diet = profile.dietSettings
+        val proteinGrams = diet?.protein ?: (profile.weightKg * PROTEIN_PER_KG).roundToInt()
+        val fatsGrams = diet?.fats ?: (profile.weightKg * FATS_PER_KG).roundToInt()
+        val carbsGrams = diet?.carbs ?: run {
+            val caloriesFromProtein = proteinGrams * 4
+            val caloriesFromFats = fatsGrams * 9
+            val carbsCalories = (calories - caloriesFromProtein - caloriesFromFats).coerceAtLeast(0)
+            (carbsCalories / 4f).roundToInt()
+        }
 
-        return Norm(
-            calories = calories,
-            protein = proteinGrams,
-            fats = fatsGrams,
-            carbs = carbsGrams
-        )
+        return Norm(calories = calories, protein = proteinGrams, fats = fatsGrams, carbs = carbsGrams)
     }
 }
