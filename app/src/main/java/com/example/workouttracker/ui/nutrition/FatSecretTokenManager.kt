@@ -43,19 +43,21 @@ class FatSecretTokenManager(
             .build()
 
         val response = runCatching { httpClient.newCall(request).execute() }.getOrNull() ?: return@withContext null
-        if (!response.isSuccessful) return@withContext null
+        response.use {
+            if (!it.isSuccessful) return@withContext null
 
-        val json = runCatching { JSONObject(response.body?.string().orEmpty()) }.getOrNull() ?: return@withContext null
-        val accessToken = json.optString("access_token", "")
-        val expiresIn = json.optLong("expires_in", 0L)
-        if (accessToken.isBlank() || expiresIn <= 0) return@withContext null
+            val json = runCatching { JSONObject(it.body?.string().orEmpty()) }.getOrNull() ?: return@withContext null
+            val accessToken = json.optString("access_token", "")
+            val expiresIn = json.optLong("expires_in", 0L)
+            if (accessToken.isBlank() || expiresIn <= 0) return@withContext null
 
-        prefs.edit()
-            .putString(KEY_TOKEN, accessToken)
-            .putLong(KEY_EXPIRES_AT, now + expiresIn)
-            .apply()
+            prefs.edit()
+                .putString(KEY_TOKEN, accessToken)
+                .putLong(KEY_EXPIRES_AT, now + expiresIn)
+                .apply()
 
-        accessToken
+            accessToken
+        }
     }
 
     fun storeClientCredentialsTemporarily(clientId: String, clientSecret: String) {

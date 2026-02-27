@@ -2,40 +2,49 @@ package com.example.workouttracker.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-/* ===== Базовые оттенки (синие/бирюзовые для стандартных тем) ===== */
-val PrimaryBlue   = Color(0xFF0A6ABF)
-val PrimaryLight  = Color(0xFF69B7FF)
-val SecondaryTeal = Color(0xFF007D8C)
+/* ===== Базовые оттенки (современная Material 3 палитра) ===== */
+val PrimaryBlue   = Color(0xFF245FA6)
+val PrimaryLight  = Color(0xFF7AB7FF)
+val SecondaryTeal = Color(0xFF006C78)
+val TertiaryViolet = Color(0xFF6B4FA3)
 
 /* ====== LIGHT ====== */
 val LightPrimary            = PrimaryBlue
 val LightOnPrimary          = Color(0xFFFFFFFF)
-val LightPrimaryContainer   = Color(0xFFE6F2FF)
-val LightOnPrimaryContainer = Color(0xFF0A3058)
+val LightPrimaryContainer   = Color(0xFFD5E3FF)
+val LightOnPrimaryContainer = Color(0xFF001C3B)
 val LightSecondary          = SecondaryTeal
 val LightOnSecondary        = Color(0xFFFFFFFF)
-val LightBackground         = Color(0xFFF7FAFD)
+val LightBackground         = Color(0xFFF7F9FF)
 val LightSurface            = Color(0xFFFFFFFF)
-val LightOnSurface          = Color(0xFF1A1A1A)
-val LightSurfaceVariant     = Color(0xFFE9F1FA)
-val LightOutline            = Color(0xFFB6C3CF)
-val LightError              = Color(0xFFB00020)
+val LightOnSurface          = Color(0xFF171C24)
+val LightSurfaceVariant     = Color(0xFFDFE3EC)
+val LightOutline            = Color(0xFF707784)
+val LightError              = Color(0xFFBA1A1A)
 val LightOnError            = Color(0xFFFFFFFF)
+val LightTertiary           = TertiaryViolet
+val LightOnTertiary         = Color(0xFFFFFFFF)
+val LightTertiaryContainer  = Color(0xFFEBDFFF)
+val LightOnTertiaryContainer = Color(0xFF25123F)
 
 /* ====== DARK ====== */
-val DarkPrimary             = Color(0xFF8CC9FF)
-val DarkOnPrimary           = Color(0xFF01243F)
-val DarkPrimaryContainer    = Color(0xFF053055)
-val DarkOnPrimaryContainer  = Color(0xFFBFE1FF)
-val DarkSecondary           = Color(0xFF7DE4F0)
+val DarkPrimary             = Color(0xFFA8C8FF)
+val DarkOnPrimary           = Color(0xFF003061)
+val DarkPrimaryContainer    = Color(0xFF004789)
+val DarkOnPrimaryContainer  = Color(0xFFD5E3FF)
+val DarkSecondary           = Color(0xFF76D5E3)
 val DarkOnSecondary         = Color(0xFF00363D)
-val DarkBackground          = Color(0xFF0E1319)
+val DarkBackground          = Color(0xFF10131A)
 val DarkSurface             = Color(0xFF171C24)
-val DarkOnSurface           = Color(0xFFE6EDF5)
-val DarkSurfaceVariant      = Color(0xFF243141)
-val DarkOutline             = Color(0xFF8392A3)
-val DarkError               = Color(0xFFCF6679)
-val DarkOnError             = Color(0xFF000000)
+val DarkOnSurface           = Color(0xFFEFF0FA)
+val DarkSurfaceVariant      = Color(0xFF434955)
+val DarkOutline             = Color(0xFF8D94A1)
+val DarkError               = Color(0xFFFFB4AB)
+val DarkOnError             = Color(0xFF690005)
+val DarkTertiary            = Color(0xFFD3BCFF)
+val DarkOnTertiary          = Color(0xFF3C255B)
+val DarkTertiaryContainer   = Color(0xFF533C73)
+val DarkOnTertiaryContainer = Color(0xFFEBDFFF)
 
 /* ====== WARM (тёплая, коричнево-янтарная) — LIGHT ====== */
 val WarmLightPrimary            = Color(0xFF8D5A2B)  // карамель/латте

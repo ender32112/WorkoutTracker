@@ -84,11 +84,13 @@ object OAuth1FatSecret {
             .build()
 
         val response = runCatching { client.newCall(request).execute() }.getOrNull() ?: return@withContext null
-        if (!response.isSuccessful) {
-            // бросим исключение для удобства отладки — вызывающий код должен ловить
-            val err = response.body?.string().orEmpty()
-            throw RuntimeException("FatSecret call failed ${response.code}: $err")
+        response.use {
+            if (!it.isSuccessful) {
+                // бросим исключение для удобства отладки — вызывающий код должен ловить
+                val err = it.body?.string().orEmpty()
+                throw RuntimeException("FatSecret call failed ${it.code}: $err")
+            }
+            it.body?.string()
         }
-        response.body?.string()
     }
 }
