@@ -519,6 +519,36 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun updateFridgeItem(
+        itemId: Long,
+        name: String,
+        calories100: Float,
+        protein100: Float,
+        fats100: Float,
+        carbs100: Float,
+        amount: Int,
+        unit: QuantityUnit
+    ) {
+        val existing = _fridgeItems.value.firstOrNull { it.id == itemId } ?: return
+        viewModelScope.launch {
+            dao.updateFridgeItem(
+                FridgeItemEntity(
+                    id = itemId,
+                    userId = userId,
+                    name = name,
+                    unitType = unit.name,
+                    amount = amount,
+                    calories100 = calories100,
+                    protein100 = protein100,
+                    fats100 = fats100,
+                    carbs100 = carbs100,
+                    barcode = existing.barcode,
+                    updatedAt = System.currentTimeMillis()
+                )
+            )
+        }
+    }
+
     fun addScannedProductToFridge(product: ProductLookupResult, amount: Int, unit: QuantityUnit) {
         viewModelScope.launch {
             dao.upsertFridgeItem(
