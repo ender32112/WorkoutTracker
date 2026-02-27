@@ -8,9 +8,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Kitchen
 import androidx.compose.material.icons.filled.Settings
@@ -62,6 +64,7 @@ fun NutritionScreen(
     var showRegenerateWarning by remember { mutableStateOf(false) }
     var showFridgeDialog by remember { mutableStateOf(false) }
     var showFridgeManagerDialog by remember { mutableStateOf(false) }
+    var showMealPlanActionsDialog by remember { mutableStateOf(false) }
 
     val snackbarHost = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()                // ← добавили
@@ -124,101 +127,131 @@ fun NutritionScreen(
                 }
             )
         },
-        floatingActionButton = {
-            FloatingActionButton(onClick = { showAddDialog = true }) {
-                Icon(Icons.Filled.Add, contentDescription = "Добавить")
-            }
-        },
         snackbarHost = { SnackbarHost(snackbarHost) }
     ) { padding ->
-        LazyColumn(
+        Box(
             modifier = Modifier
                 .padding(padding)
-                .fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .fillMaxSize()
         ) {
-            item { TodayCard(todayTotal, viewModel.dailyNorm) }
-            item {
-                MealPlanCard(
-                    mealPlan = mealPlan,
-                    isLoading = isPlanLoading,
-                    error = planError,
-                    onGenerateClick = {
-                        val planExists = mealPlan != null || viewModel.hasCachedPlanForDate(today)
-                        if (planExists) {
-                            showRegenerateWarning = true
-                        } else {
-                            showFridgeChoiceDialog = true
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 104.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                item { TodayCard(todayTotal, viewModel.dailyNorm) }
+                item {
+                    MealPlanCard(
+                        mealPlan = mealPlan,
+                        isLoading = isPlanLoading,
+                        error = planError,
+                        onDismissError = { viewModel.clearPlanError() },
+                        onReplaceMeal = { type ->
+                            replaceMealType = type
+                            replaceComment = ""
+                            showReplaceDialog = true
                         }
-                    },
-                    onDismissError = { viewModel.clearPlanError() },
-                    onReplaceMeal = { type ->
-                        replaceMealType = type
-                        replaceComment = ""
-                        showReplaceDialog = true
-                    },
-                    canReuseYesterdayPlan = canReuseYesterdayPlan,
-                    onReuseYesterdayClick = { viewModel.reuseYesterdayPlan() }
-                )
-            }
+                    )
+                }
 
-            grouped.forEach { (date, _) ->
-                stickyHeader {
-                    Surface(tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(
-                                    Brush.horizontalGradient(
-                                        listOf(
-                                            MaterialTheme.colorScheme.primaryContainer,
-                                            MaterialTheme.colorScheme.tertiaryContainer
+                grouped.forEach { (date, _) ->
+                    stickyHeader {
+                        Surface(tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(
+                                        Brush.horizontalGradient(
+                                            listOf(
+                                                MaterialTheme.colorScheme.primaryContainer,
+                                                MaterialTheme.colorScheme.tertiaryContainer
+                                            )
                                         )
                                     )
+                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                            ) {
+                                Text(
+                                    text = formatDateForDisplay(date),
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                                 )
-                                .padding(horizontal = 12.dp, vertical = 8.dp)
-                        ) {
-                            Text(
-                                text = formatDateForDisplay(date),
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                            )
+                            }
+                        }
+                    }
+
+                    val byMealType = viewModel.getEntriesByDate(date)
+
+                    mealTypeOrder.forEach { type ->
+                        val entriesForType = byMealType[type].orEmpty()
+                        if (entriesForType.isNotEmpty()) {
+                            item { MealTypeHeader(type) }
+
+                            items(entriesForType, key = { it.id }) { entry ->
+                                NutritionEntryCard(
+                                    entry = entry,
+                                    onEdit = { editEntry = entry },
+                                    onDelete = {
+                                        viewModel.removeEntry(entry.id)
+                                        scope.launch { snack("Удалено: ${entry.name}") }
+                                    }
+                                )
+                            }
+
+                            item { Spacer(Modifier.height(8.dp)) }
                         }
                     }
                 }
 
-                val byMealType = viewModel.getEntriesByDate(date)
-
-                mealTypeOrder.forEach { type ->
-                    val entriesForType = byMealType[type].orEmpty()
-                    if (entriesForType.isNotEmpty()) {
-                        item { MealTypeHeader(type) }
-
-                        items(entriesForType, key = { it.id }) { entry ->
-                            NutritionEntryCard(
-                                entry = entry,
-                                onEdit = { editEntry = entry },
-                                onDelete = {
-                                    viewModel.removeEntry(entry.id)
-                                    scope.launch { snack("Удалено: ${entry.name}") }   // ← заменили LaunchedEffect
-                                }
-                            )
+                if (grouped.isEmpty()) {
+                    item {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("Нет записей", style = MaterialTheme.typography.bodyLarge)
                         }
-
-                        item { Spacer(Modifier.height(8.dp)) }
                     }
                 }
             }
 
-            if (grouped.isEmpty()) {
-                item {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("Нет записей", style = MaterialTheme.typography.bodyLarge)
-                    }
-                }
+            FloatingActionButton(
+                onClick = { showMealPlanActionsDialog = true },
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(16.dp),
+                containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+            ) {
+                Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = "Управление планом питания")
             }
 
+            FloatingActionButton(
+                onClick = { showAddDialog = true },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp)
+            ) {
+                Icon(Icons.Filled.Add, contentDescription = "Добавить")
+            }
         }
+    }
+
+    if (showMealPlanActionsDialog) {
+        MealPlanActionsDialog(
+            mealPlan = mealPlan,
+            isLoading = isPlanLoading,
+            canReuseYesterdayPlan = canReuseYesterdayPlan,
+            onDismiss = { showMealPlanActionsDialog = false },
+            onGenerateOrUpdate = {
+                showMealPlanActionsDialog = false
+                val planExists = mealPlan != null || viewModel.hasCachedPlanForDate(today)
+                if (planExists) {
+                    showRegenerateWarning = true
+                } else {
+                    showFridgeChoiceDialog = true
+                }
+            },
+            onReuseYesterday = {
+                showMealPlanActionsDialog = false
+                viewModel.reuseYesterdayPlan()
+            }
+        )
     }
 
     if (showRegenerateWarning) {
@@ -592,11 +625,8 @@ fun MealPlanCard(
     mealPlan: MealPlan?,
     isLoading: Boolean,
     error: String?,
-    onGenerateClick: () -> Unit,
     onDismissError: () -> Unit,
-    onReplaceMeal: (MealType) -> Unit,
-    canReuseYesterdayPlan: Boolean,
-    onReuseYesterdayClick: () -> Unit
+    onReplaceMeal: (MealType) -> Unit
 ) {
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
@@ -623,24 +653,27 @@ fun MealPlanCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(
-                    text = "План питания",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                )
-                Button(
-                    onClick = onGenerateClick,
-                    enabled = !isLoading
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = "План питания",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                    Text(
+                        text = "Управление через иконку внизу слева",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.65f)
                 ) {
-                    if (isLoading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text("Генерация...")
-                    } else {
-                        Text(if (mealPlan == null) "Сгенерировать" else "Обновить")
-                    }
+                    Icon(
+                        imageVector = Icons.Filled.AutoAwesome,
+                        contentDescription = null,
+                        modifier = Modifier.padding(8.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
                 }
             }
 
@@ -716,14 +749,55 @@ fun MealPlanCard(
                     text = "План на сегодня ещё не создан.",
                     style = MaterialTheme.typography.bodySmall
                 )
-                if (canReuseYesterdayPlan) {
-                    Spacer(Modifier.height(8.dp))
-                    Button(onClick = onReuseYesterdayClick, enabled = !isLoading) {
-                        Text("Использовать вчерашний план")
-                    }
-                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "Нажмите на иконку книги слева внизу, чтобы быстро создать или обновить план.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }
 }
 
+@Composable
+private fun MealPlanActionsDialog(
+    mealPlan: MealPlan?,
+    isLoading: Boolean,
+    canReuseYesterdayPlan: Boolean,
+    onDismiss: () -> Unit,
+    onGenerateOrUpdate: () -> Unit,
+    onReuseYesterday: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Управление планом") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "Выберите действие для плана питания",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                FilledTonalButton(onClick = onGenerateOrUpdate, enabled = !isLoading, modifier = Modifier.fillMaxWidth()) {
+                    if (isLoading) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Генерация...")
+                    } else {
+                        Text(if (mealPlan == null) "Сформировать план" else "Пересобрать план")
+                    }
+                }
+                if (canReuseYesterdayPlan) {
+                    OutlinedButton(onClick = onReuseYesterday, enabled = !isLoading, modifier = Modifier.fillMaxWidth()) {
+                        Text("Использовать вчерашний план")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Закрыть")
+            }
+        }
+    )
+}
