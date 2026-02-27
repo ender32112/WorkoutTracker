@@ -19,6 +19,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
@@ -191,116 +192,143 @@ private fun RegistrationFields(
     weight: String,
     onWeightChange: (String) -> Unit
 ) {
-    val rowModifier = Modifier.weight(1f)
+    var genderExpanded by remember { mutableStateOf(false) }
 
-    val fieldPairs = listOf(
-        {
+    val emailField: @Composable () -> Unit = {
+        OutlinedTextField(
+            value = email,
+            onValueChange = onEmailChange,
+            label = { Text("Email") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+
+    val passwordField: @Composable () -> Unit = {
+        OutlinedTextField(
+            value = password,
+            onValueChange = onPasswordChange,
+            label = { Text("Пароль") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            visualTransformation = PasswordVisualTransformation(),
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+
+    val firstNameField: @Composable () -> Unit = {
+        OutlinedTextField(
+            value = firstName,
+            onValueChange = onFirstNameChange,
+            label = { Text("Имя") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+
+    val lastNameField: @Composable () -> Unit = {
+        OutlinedTextField(
+            value = lastName,
+            onValueChange = onLastNameChange,
+            label = { Text("Фамилия") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+
+    val ageField: @Composable () -> Unit = {
+        OutlinedTextField(
+            value = age,
+            onValueChange = onAgeChange,
+            label = { Text("Возраст") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+
+    val genderField: @Composable () -> Unit = {
+        ExposedDropdownMenuBox(
+            expanded = genderExpanded,
+            onExpandedChange = { genderExpanded = !genderExpanded }
+        ) {
             OutlinedTextField(
-                value = email,
-                onValueChange = onEmailChange,
-                label = { Text("Email") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
+                value = gender,
+                onValueChange = {},
+                label = { Text("Пол") },
+                readOnly = true,
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = genderExpanded) },
+                modifier = Modifier
+                    .menuAnchor()
+                    .fillMaxWidth()
             )
-        } to {
-            OutlinedTextField(
-                value = password,
-                onValueChange = onPasswordChange,
-                label = { Text("Пароль") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                visualTransformation = PasswordVisualTransformation(),
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-        },
-        {
-            OutlinedTextField(
-                value = firstName,
-                onValueChange = onFirstNameChange,
-                label = { Text("Имя") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-        } to {
-            OutlinedTextField(
-                value = lastName,
-                onValueChange = onLastNameChange,
-                label = { Text("Фамилия") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-        },
-        {
-            OutlinedTextField(
-                value = age,
-                onValueChange = onAgeChange,
-                label = { Text("Возраст") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-        } to {
-            var expanded by remember { mutableStateOf(false) }
-            ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
-                OutlinedTextField(
-                    value = gender,
-                    onValueChange = {},
-                    label = { Text("Пол") },
-                    readOnly = true,
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-                    modifier = Modifier
-                        .menuAnchor()
-                        .fillMaxWidth()
-                )
-                ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                    listOf("Мужской", "Женский").forEach { option ->
-                        DropdownMenuItem(
-                            text = { Text(option) },
-                            onClick = {
-                                onGenderChange(option)
-                                expanded = false
-                            }
-                        )
-                    }
+            DropdownMenu(
+                expanded = genderExpanded,
+                onDismissRequest = { genderExpanded = false }
+            ) {
+                listOf("Мужской", "Женский").forEach { option ->
+                    DropdownMenuItem(
+                        text = { Text(option) },
+                        onClick = {
+                            onGenderChange(option)
+                            genderExpanded = false
+                        }
+                    )
                 }
             }
-        },
-        {
-            OutlinedTextField(
-                value = height,
-                onValueChange = onHeightChange,
-                label = { Text("Рост (см)") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-        } to {
-            OutlinedTextField(
-                value = weight,
-                onValueChange = onWeightChange,
-                label = { Text("Вес (кг)") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
         }
-    )
+    }
+
+    val heightField: @Composable () -> Unit = {
+        OutlinedTextField(
+            value = height,
+            onValueChange = onHeightChange,
+            label = { Text("Рост (см)") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+
+    val weightField: @Composable () -> Unit = {
+        OutlinedTextField(
+            value = weight,
+            onValueChange = onWeightChange,
+            label = { Text("Вес (кг)") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
 
     if (isExpanded) {
-        fieldPairs.forEach { pair ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Column(rowModifier) { pair.first.invoke() }
-                Column(rowModifier) { pair.second.invoke() }
-            }
-        }
+        RegistrationFieldRow(emailField, passwordField)
+        RegistrationFieldRow(firstNameField, lastNameField)
+        RegistrationFieldRow(ageField, genderField)
+        RegistrationFieldRow(heightField, weightField)
     } else {
-        fieldPairs.forEach { pair ->
-            pair.first.invoke()
-            pair.second.invoke()
-        }
+        emailField()
+        passwordField()
+        firstNameField()
+        lastNameField()
+        ageField()
+        genderField()
+        heightField()
+        weightField()
+    }
+}
+
+@Composable
+private fun RegistrationFieldRow(
+    firstField: @Composable () -> Unit,
+    secondField: @Composable () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Column(modifier = Modifier.weight(1f)) { firstField() }
+        Column(modifier = Modifier.weight(1f)) { secondField() }
     }
 }
