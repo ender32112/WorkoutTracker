@@ -26,5 +26,6 @@ data class FridgeItemUiModel(
     val protein100: Float,
     val fats100: Float,
     val carbs100: Float,
-    val barcode: String? = null
+    val barcode: String? = null,
+    val updatedAt: Long = System.currentTimeMillis()
 )

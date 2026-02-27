@@ -28,11 +28,7 @@ import com.example.workouttracker.ui.nutrition.OpenFoodFactsRepository
 import com.example.workouttracker.ui.nutrition.FatSecretRepository
 import com.example.workouttracker.ui.nutrition.ProductRepository
 import com.example.workouttracker.ui.nutrition.FridgeItemUiModel
-import com.example.workouttracker.ui.nutrition_analytic.DailyAnalytics
-import com.example.workouttracker.ui.nutrition_analytic.FoodRating
 import com.example.workouttracker.ui.nutrition_analytic.FoodCanonicalizer
-import com.example.workouttracker.ui.nutrition_analytic.NutritionAnalyticsEngine
-import com.example.workouttracker.ui.nutrition_analytic.WeeklyAnalytics
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -64,7 +60,6 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     private val nutritionAiRepository = NutritionAiRepository.getInstance(application.applicationContext, userId)
     private val behaviorRepository = BehaviorPreferencesRepository(application.applicationContext, userId)
     private val foodCanonicalizer = FoodCanonicalizer(application.applicationContext, nutritionAiRepository)
-    private val analyticsEngine = NutritionAnalyticsEngine(foodCanonicalizer)
 
     private val _entries = MutableStateFlow<List<NutritionEntry>>(emptyList())
     val entries: StateFlow<List<NutritionEntry>> = _entries
@@ -91,14 +86,6 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     private val _fridgeExtraPrompt = MutableStateFlow<FridgeExtraPrompt?>(null)
     val fridgeExtraPrompt: StateFlow<FridgeExtraPrompt?> = _fridgeExtraPrompt
 
-    private val _todayAnalytics = MutableStateFlow<DailyAnalytics?>(null)
-    val todayAnalytics: StateFlow<DailyAnalytics?> = _todayAnalytics
-
-    private val _weeklyAnalytics = MutableStateFlow<WeeklyAnalytics?>(null)
-    val weeklyAnalytics: StateFlow<WeeklyAnalytics?> = _weeklyAnalytics
-
-    private val _foodRatings = MutableStateFlow<List<FoodRating>>(emptyList())
-    val foodRatings: StateFlow<List<FoodRating>> = _foodRatings
 
     private val _fridgeItems = MutableStateFlow<List<FridgeItemUiModel>>(emptyList())
     val fridgeItems = _fridgeItems.asStateFlow()
@@ -171,7 +158,8 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                         protein100 = it.protein100,
                         fats100 = it.fats100,
                         carbs100 = it.carbs100,
-                        barcode = it.barcode
+                        barcode = it.barcode,
+                        updatedAt = it.updatedAt
                     )
                 }
             }
@@ -226,50 +214,6 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 )
             }
             .sortedByDescending { it.date }
-    }
-
-    fun computeTodayAnalytics() {
-        val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-        val plan = _mealPlan.value
-        val entriesToday = entries.value.filter { it.date == today }
-        viewModelScope.launch {
-            _todayAnalytics.value = analyticsEngine.computeDailyAnalytics(today, plan, entriesToday)
-        }
-    }
-
-    fun computeWeeklyAnalytics() {
-        val recentDates = getDailySummaries()
-            .sortedByDescending { it.date }
-            .take(7)
-            .map { it.date }
-
-        val mealPlans = recentDates.associateWith { date ->
-            nutritionAiRepository.loadCachedPlan(date)
-        }
-
-        val entriesByDate = recentDates.associateWith { date ->
-            entries.value.filter { it.date == date }
-        }
-
-        viewModelScope.launch {
-            val result = analyticsEngine.computeWeeklyAnalytics(recentDates, mealPlans, entriesByDate)
-            _weeklyAnalytics.value = result.weeklyAnalytics
-            _foodRatings.value = analyticsEngine.buildFoodRatings(result.foodStats)
-
-            result.weeklyAnalytics?.days.orEmpty().forEach { day ->
-                day.mealComparisons.forEach { comparison ->
-                    comparison.plannedItems.forEach { item ->
-                        behaviorRepository.registerPlannedFood(item.nameCanonical)
-                    }
-                    comparison.matched.forEach { matched ->
-                        behaviorRepository.registerEatenFood(matched.planned.nameCanonical)
-                    }
-                    comparison.missedFromPlan.forEach { item ->
-                        behaviorRepository.registerSkippedFood(item.nameCanonical)
-                    }
-                }
-            }
-        }
     }
 
     private fun calculateAdjustedGoal(
@@ -541,6 +485,38 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             ),
             portionWeight = grams
         )
+    }
+
+
+    fun addManualProductToFridge(
+        name: String,
+        calories100: Float,
+        protein100: Float,
+        fats100: Float,
+        carbs100: Float,
+        amount: Int,
+        unit: QuantityUnit
+    ) {
+        viewModelScope.launch {
+            dao.upsertFridgeItem(
+                FridgeItemEntity(
+                    userId = userId,
+                    name = name,
+                    unitType = unit.name,
+                    amount = amount,
+                    calories100 = calories100,
+                    protein100 = protein100,
+                    fats100 = fats100,
+                    carbs100 = carbs100
+                )
+            )
+        }
+    }
+
+    fun removeFridgeItem(itemId: Long) {
+        viewModelScope.launch {
+            dao.deleteFridgeItem(userId, itemId)
+        }
     }
 
     fun addScannedProductToFridge(product: ProductLookupResult, amount: Int, unit: QuantityUnit) {
