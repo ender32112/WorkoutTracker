@@ -60,7 +60,7 @@ data class ChatMessageContent(
 class NutritionAiRepository private constructor(context: Context, private val userId: String) {
 
     private val gson = Gson()
-    private val prefs = context.applicationContext.getSharedPreferences("nutrition_cache_$userId", Context.MODE_PRIVATE)
+    private val prefs = context.applicationContext.getSharedPreferences("nutrition_cache_${'$'}userId", Context.MODE_PRIVATE)
 
     // ---------- OkHttp клиент ----------
 
@@ -115,7 +115,9 @@ class NutritionAiRepository private constructor(context: Context, private val us
         date: String,
         profile: NutritionProfile?,
         recommendedNorm: Norm?,
-        userNorm: Map<String, Int>?
+        userNorm: Map<String, Int>?,
+        history: List<NutritionViewModel.DailyNutritionSummary>,
+        dislikedByBehavior: Set<String>
     ): MealPlan = withContext(Dispatchers.IO) {
 
         val defaultNorm = mapOf(
@@ -141,10 +143,20 @@ class NutritionAiRepository private constructor(context: Context, private val us
             ?: recommendedNorm?.carbs
             ?: defaultNorm.getValue("carbs")
 
-        val adjustedCalories = targetCaloriesBase
-        val adjustedProtein = targetProteinBase.coerceAtLeast(0)
-        val adjustedFats = targetFatsBase.coerceAtLeast(0)
-        val adjustedCarbs = targetCarbsBase.coerceAtLeast(0)
+        val historyWindow = history.take(7)
+        val avgCalories = historyWindow.takeIf { it.isNotEmpty() }?.map { it.calories }?.average()
+        val calorieDiff = avgCalories?.minus(targetCaloriesBase)
+        val calorieAdjustment = calorieDiff?.let { (-it).coerceIn(-400.0, 400.0) } ?: 0.0
+        val adjustedCaloriesDouble = (targetCaloriesBase + calorieAdjustment).coerceAtLeast(1500.0)
+        val adjustedCalories = adjustedCaloriesDouble.roundToInt()
+
+// коэффициент, во сколько раз изменилась калорийность
+        val scale = adjustedCaloriesDouble / targetCaloriesBase.toDouble()
+
+// масштабируем макросы пропорционально
+        val adjustedProtein = (targetProteinBase * scale).roundToInt().coerceAtLeast(0)
+        val adjustedFats    = (targetFatsBase * scale).roundToInt().coerceAtLeast(0)
+        val adjustedCarbs   = (targetCarbsBase * scale).roundToInt().coerceAtLeast(0)
 
         val profileDescription = profile?.let {
             "Пол: ${if (it.sex.name == "MALE") "мужчина" else "женщина"}, " +
@@ -164,6 +176,31 @@ class NutritionAiRepository private constructor(context: Context, private val us
 
         val effectiveNormText =
             "Эффективная цель с учётом истории: $adjustedCalories ккал, белки $adjustedProtein г, жиры $adjustedFats г, углеводы $adjustedCarbs г."
+
+
+        val behaviorDislikedText = if (dislikedByBehavior.isNotEmpty()) {
+            "Список блюд, которые пользователь часто заменяет или избегает (считай, что они ему не нравятся): " +
+                dislikedByBehavior.joinToString()
+        } else {
+            "Нет явных нелюбимых блюд по поведению."
+        }
+
+
+        val historyDetails = if (historyWindow.isNotEmpty()) {
+            historyWindow.joinToString(separator = "\n") { h ->
+                "- ${h.date}: ${h.calories} ккал (Б:${h.protein}, Ж:${h.fats}, У:${h.carbs})"
+            }
+        } else {
+            "История питания за последние дни отсутствует."
+        }
+
+        val historySummary = calorieDiff?.let {
+            when {
+                it > 50 -> "За последние ${historyWindow.size} дней пользователь в среднем переедал примерно на ${it.roundToInt()} ккал. Сделай план сегодня примерно на ${calorieAdjustment.roundToInt().let { adj -> if (adj < 0) -adj else 0 }} ккал ниже базовой цели, но не опускайся ниже 1500 ккал."
+                it < -50 -> "За последние ${historyWindow.size} дней пользователь в среднем недоедал примерно на ${(-it).roundToInt()} ккал. Добавь немного калорий к плану, но оставайся в разумных пределах здоровья."
+                else -> "Последние дни близки к целевой норме, придерживайся базовой цели."
+            }
+        } ?: "История отсутствует, используй базовую цель."
 
         val systemPrompt = """
             Ты диетолог и нутриционист. Тебе нужно составить персонализированный план питания на день.
@@ -189,12 +226,11 @@ class NutritionAiRepository private constructor(context: Context, private val us
 
             Обязательные требования:
             - Верни только JSON без пояснений.
-            - Суммарные калории и макроэлементы по всем блюдам должны укладываться в допуски: калории ±5%, белки/жиры/углеводы ±10%.
-            - Проверяй арифметику: калории блюда примерно равны 4*белки + 9*жиры + 4*углеводы (допуск ±15%).
+            - Суммарные калории и макроэлементы по всем блюдам должны быть близки к целевой норме.
             - Используй несколько приёмов пищи (завтрак, обед, ужин, перекусы), в каждом 1–3 блюда.
             - Никогда не предлагай блюда, содержащие указанные аллергены.
             - По возможности избегай нелюбимых продуктов.
-            - Используй реалистичные веса порций (обычно 80–450 г на блюдо).
+            - Никогда не предлагай блюда из списка dislikedByBehavior (то, что пользователь часто заменяет).
         """.trimIndent()
 
         val userPrompt = """
@@ -208,11 +244,19 @@ class NutritionAiRepository private constructor(context: Context, private val us
             $userNormText
             $effectiveNormText
 
+            $behaviorDislikedText
+
+            Учитывай, что эти блюда пользователю не нравятся, не предлагай их в плане.
+
             Считай именно эту эффективную цель основной при составлении плана.
 
             Старайся ориентироваться на пользовательскую норму, но учитывай рекомендации и цель (похудение/набор/поддержание).
 
-            Задача: составь план питания на сегодняшний день, приблизься к целевой норме (калории и макросы) без экстремальных ограничений.
+            История питания (последние ${historyWindow.size} дней):
+            $historyDetails
+            $historySummary
+
+            Задача: составь план питания на сегодняшний день, приблизься к целевой норме (калории и макросы), слегка скорректировав калорийность с учётом истории, без экстремальных ограничений.
             Верни только JSON в указанном формате.
         """.trimIndent()
 
@@ -278,7 +322,7 @@ class NutritionAiRepository private constructor(context: Context, private val us
                 mealObj.has("type") -> mealObj.get("type").asString
                 else -> throw IllegalStateException("У приёма пищи отсутствует поле mealType/type")
             }
-            val type = MealType.entries.firstOrNull { it.name == typeStr.uppercase(Locale.ROOT) } ?: MealType.OTHER
+            val type = MealType.valueOf(typeStr.uppercase(Locale.ROOT))
 
             val itemsJson = mealObj.getAsJsonArray("items")
                 ?: throw IllegalStateException("У приёма пищи нет массива items")
@@ -321,6 +365,8 @@ class NutritionAiRepository private constructor(context: Context, private val us
         profile: NutritionProfile?,
         recommendedNorm: Norm?,
         userNorm: Map<String, Int>?,
+        history: List<NutritionViewModel.DailyNutritionSummary>,
+        dislikedByBehavior: Set<String>,
         allowExtraProducts: Boolean,
         goalCalories: Int,
         goalProtein: Int,
@@ -344,6 +390,12 @@ class NutritionAiRepository private constructor(context: Context, private val us
             "Пользовательская норма: ${it["calories"] ?: "?"} ккал, белки ${it["protein"] ?: "?"} г, жиры ${it["fats"] ?: "?"} г, углеводы ${it["carbs"] ?: "?"} г."
         } ?: "Пользовательская норма не задана."
 
+        val behaviorDislikedText =
+            if (dislikedByBehavior.isNotEmpty())
+                "Поведенческие нелюбимые продукты: ${dislikedByBehavior.joinToString()}"
+            else
+                "Нет явных нелюбимых по поведению."
+
         val fridgeListText =
             if (fridge.isNotEmpty()) {
                 fridge.joinToString(separator = "\n") { product ->
@@ -352,6 +404,16 @@ class NutritionAiRepository private constructor(context: Context, private val us
                 }
             } else {
                 "Список продуктов пуст."
+            }
+
+        val historyWindow = history.take(7)
+        val historyDetails =
+            if (historyWindow.isNotEmpty()) {
+                historyWindow.joinToString(separator = "\n") { h ->
+                    "- ${h.date}: ${h.calories} ккал (Б:${h.protein}, Ж:${h.fats}, У:${h.carbs})"
+                }
+            } else {
+                "История питания за последние дни отсутствует."
             }
 
         // -----------------------------------------------------------------------
@@ -400,9 +462,8 @@ class NutritionAiRepository private constructor(context: Context, private val us
         -----------------------------
         Ограничения:
         -----------------------------
-        - Соблюдай аллергены и нелюбимые продукты.
-        - Суммарные макросы должны быть максимально близки к дневной цели (калории ±5%, белки/жиры/углеводы ±10%).
-        - Проверяй арифметику блюда: калории ≈ 4*белки + 9*жиры + 4*углеводы (допуск ±15%).
+        - Соблюдай аллергены, нелюбимые продукты и dislikedByBehavior.
+        - Суммарные макросы должны быть максимально близки к дневной цели.
         - Используй 3–5 приёмов пищи.
         - Верни только корректный JSON.
     """.trimIndent()
@@ -431,6 +492,11 @@ class NutritionAiRepository private constructor(context: Context, private val us
 
         Нелюбимые продукты:
         ${profile?.dislikedIngredients?.joinToString().orEmpty().ifBlank { "нет" }}
+        $behaviorDislikedText
+
+        История питания:
+        $historyDetails
+
         allowExtraProducts = $allowExtraProducts
 
         Требуется:
@@ -495,7 +561,7 @@ class NutritionAiRepository private constructor(context: Context, private val us
                 if (mealObj.has("mealType")) mealObj.get("mealType").asString
                 else mealObj.get("type").asString
 
-            val type = MealType.entries.firstOrNull { it.name == typeStr.uppercase(Locale.ROOT) } ?: MealType.OTHER
+            val type = MealType.valueOf(typeStr.uppercase(Locale.ROOT))
 
             val itemsJson = mealObj.getAsJsonArray("items")
                 ?: throw IllegalStateException("У приёма пищи нет items")
@@ -584,6 +650,7 @@ class NutritionAiRepository private constructor(context: Context, private val us
         profile: NutritionProfile?,
         recommendedNorm: Norm?,
         userNorm: Map<String, Int>?,
+        dislikedByBehavior: Set<String>,
         comment: String?
     ): PlannedMeal = withContext(Dispatchers.IO) {
 
@@ -603,6 +670,12 @@ class NutritionAiRepository private constructor(context: Context, private val us
             "Пользовательская норма: ${it["calories"] ?: "?"} ккал, белки ${it["protein"] ?: "?"} г, жиры ${it["fats"] ?: "?"} г, углеводы ${it["carbs"] ?: "?"} г."
         } ?: "Пользовательская норма не задана."
 
+        val behaviorDislikedText = if (dislikedByBehavior.isNotEmpty()) {
+            "Список блюд, которые пользователь часто заменяет (поведенческие нелюбимые): " + dislikedByBehavior.joinToString()
+        } else {
+            "Нет явных нелюбимых блюд по поведению."
+        }
+
         val systemPrompt = """
             Ты нутриционист. Нужна ЗАМЕНА одного приёма пищи.
             Верни строго JSON.
@@ -615,9 +688,7 @@ class NutritionAiRepository private constructor(context: Context, private val us
             }
 
             Требования:
-            - Сохрани тип приёма пищи, который передан в запросе.
-            - Новый приём должен быть сопоставим с заменяемым по калориям и макросам (допуск ±15%).
-            - Проверяй арифметику блюда: калории ≈ 4*белки + 9*жиры + 4*углеводы (допуск ±15%).
+            - Никогда не предлагай блюда из списка dislikedByBehavior (то, что пользователь часто заменяет или избегает).
         """.trimIndent()
 
         val userPrompt = """
@@ -631,12 +702,14 @@ class NutritionAiRepository private constructor(context: Context, private val us
 
             $recommendedNormText
             $userNormText
+            $behaviorDislikedText
 
             Целевые макросы текущего плана: ${currentPlan.targetCalories} ккал, белки ${currentPlan.targetProtein} г, жиры ${currentPlan.targetFat} г, углеводы ${currentPlan.targetCarbs} г.
 
             Текущий план (meals в JSON): ${gson.toJson(currentPlan.meals)}
 
             Подбери аналогичный по калорийности и макросам приём, но учти комментарий пользователя и избегай аллергии/нелюбимых продуктов.
+            Учитывай dislikedByBehavior — это блюда, которые пользователь часто заменяет, их нельзя предлагать.
             Верни только один приём пищи строго в JSON без дополнительного текста.
         """.trimIndent()
 
@@ -691,7 +764,7 @@ class NutritionAiRepository private constructor(context: Context, private val us
             json.has("type") -> json.get("type").asString
             else -> throw IllegalStateException("В ответе отсутствует поле mealType/type")
         }
-        val type = MealType.entries.firstOrNull { it.name == typeStr.uppercase(Locale.ROOT) } ?: mealType
+        val type = MealType.valueOf(typeStr.uppercase(Locale.ROOT))
 
         val itemsJson = json.getAsJsonArray("items")
             ?: throw IllegalStateException("В ответе нет массива items")
