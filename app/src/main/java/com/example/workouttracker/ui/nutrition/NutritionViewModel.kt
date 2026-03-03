@@ -40,7 +40,6 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
-import kotlin.math.roundToInt
 
 class NutritionViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -56,7 +55,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         ),
         offRepository = OpenFoodFactsRepository(dao)
     )
-    private val profileRepository = ProfileRepository(application.applicationContext)
+    private val profileRepository = ProfileRepository(application.applicationContext, userId)
     private val nutritionAiRepository = NutritionAiRepository.getInstance(application.applicationContext, userId)
     private val behaviorRepository = BehaviorPreferencesRepository(application.applicationContext, userId)
     private val foodCanonicalizer = FoodCanonicalizer(application.applicationContext, nutritionAiRepository)
@@ -216,11 +215,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             .sortedByDescending { it.date }
     }
 
-    private fun calculateAdjustedGoal(
-        profile: NutritionProfile?,
+    private fun calculateGoal(
         recommendedNorm: Norm?,
-        userNorm: Map<String, Int>?,
-        history: List<DailyNutritionSummary>
+        userNorm: Map<String, Int>?
     ): AdjustedGoal {
         val defaultNorm = mapOf(
             "calories" to 2000,
@@ -245,24 +242,11 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             ?: recommendedNorm?.carbs
             ?: defaultNorm.getValue("carbs")
 
-        val historyWindow = history.take(7)
-        val avgCalories = historyWindow.takeIf { it.isNotEmpty() }?.map { it.calories }?.average()
-        val calorieDiff = avgCalories?.minus(targetCaloriesBase)
-        val calorieAdjustment = calorieDiff?.let { (-it).coerceIn(-400.0, 400.0) } ?: 0.0
-        val adjustedCaloriesDouble = (targetCaloriesBase + calorieAdjustment).coerceAtLeast(1500.0)
-        val adjustedCalories = adjustedCaloriesDouble.roundToInt()
-
-        val scale = adjustedCaloriesDouble / targetCaloriesBase.toDouble()
-
-        val adjustedProtein = (targetProteinBase * scale).roundToInt().coerceAtLeast(0)
-        val adjustedFats = (targetFatsBase * scale).roundToInt().coerceAtLeast(0)
-        val adjustedCarbs = (targetCarbsBase * scale).roundToInt().coerceAtLeast(0)
-
         return AdjustedGoal(
-            calories = adjustedCalories,
-            protein = adjustedProtein,
-            fats = adjustedFats,
-            carbs = adjustedCarbs
+            calories = targetCaloriesBase.coerceAtLeast(0),
+            protein = targetProteinBase.coerceAtLeast(0),
+            fats = targetFatsBase.coerceAtLeast(0),
+            carbs = targetCarbsBase.coerceAtLeast(0)
         )
     }
 
@@ -416,6 +400,10 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     fun addEntry(entry: NutritionEntry) {
         _entries.value = _entries.value + entry
         saveEntries()
+        viewModelScope.launch {
+            val canonical = foodCanonicalizer.canonicalize(entry.name)
+            behaviorRepository.registerEatenFood(canonical)
+        }
     }
 
     fun addEntry(date: String, mealType: MealType, dish: Dish, portionWeight: Int) {
@@ -626,9 +614,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             return
         }
 
-        val history = getDailySummaries().take(7)
-        val dislikedByBehavior = getDislikedByBehavior()
-        val adjustedGoal = calculateAdjustedGoal(profile.value, recommendedNorm.value, dailyNorm, history)
+        val adjustedGoal = calculateGoal(recommendedNorm.value, dailyNorm)
 
         viewModelScope.launch {
             _isPlanLoading.value = true
@@ -651,8 +637,6 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                     profile = profile.value,
                     recommendedNorm = recommendedNorm.value,
                     userNorm = dailyNorm,
-                    history = history,
-                    dislikedByBehavior = dislikedByBehavior,
                     allowExtraProducts = allowExtraProducts,
                     goalCalories = adjustedGoal.calories,
                     goalProtein = adjustedGoal.protein,
@@ -661,6 +645,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 )
                 _mealPlan.value = plan
                 nutritionAiRepository.saveCachedPlan(today, plan)
+                registerPlannedFoods(plan)
             } catch (e: Exception) {
                 e.printStackTrace()
                 _planError.value = e.message ?: "Ошибка при генерации плана"
@@ -684,8 +669,6 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun generateTodayPlan() {
         val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-        val history = getDailySummaries().take(7)
-        val dislikedByBehavior = getDislikedByBehavior()
 
         viewModelScope.launch {
             _isPlanLoading.value = true
@@ -695,12 +678,11 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                     date = today,
                     profile = profile.value,
                     recommendedNorm = recommendedNorm.value,
-                    userNorm = dailyNorm,
-                    history = history,
-                    dislikedByBehavior = dislikedByBehavior
+                    userNorm = dailyNorm
                 )
                 _mealPlan.value = plan
                 nutritionAiRepository.saveCachedPlan(today, plan)
+                registerPlannedFoods(plan)
             } catch (e: Exception) {
                 e.printStackTrace()
                 _planError.value = e.message ?: "Ошибка при генерации плана"
@@ -718,8 +700,6 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         }
 
         val oldMeal = currentPlan.meals.firstOrNull { it.type == mealType }
-        val dislikedByBehavior = getDislikedByBehavior()
-
         viewModelScope.launch {
             _isPlanLoading.value = true
             _planError.value = null
@@ -731,7 +711,6 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                     profile = profile.value,
                     recommendedNorm = recommendedNorm.value,
                     userNorm = dailyNorm,
-                    dislikedByBehavior = dislikedByBehavior,
                     comment = comment
                 )
                 oldMeal?.let { meal ->
@@ -746,6 +725,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 val updatedPlan = currentPlan.copy(meals = updatedMeals)
                 _mealPlan.value = updatedPlan
                 nutritionAiRepository.saveCachedPlan(currentPlan.date, updatedPlan)
+                registerPlannedFoods(updatedPlan)
             } catch (e: Exception) {
                 e.printStackTrace()
                 _planError.value = e.message ?: "Ошибка при замене приёма"
@@ -807,7 +787,14 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         _planError.value = null
     }
 
-    private fun getDislikedByBehavior(): Set<String> {
-        return behaviorRepository.getDislikedByBehavior()
+    private fun registerPlannedFoods(plan: MealPlan) {
+        viewModelScope.launch {
+            plan.meals
+                .flatMap { it.items }
+                .forEach { item ->
+                    val canonical = foodCanonicalizer.canonicalize(item.name)
+                    behaviorRepository.registerPlannedFood(canonical)
+                }
+        }
     }
 }
