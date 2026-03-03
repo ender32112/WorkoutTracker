@@ -11,9 +11,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Kitchen
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -32,10 +34,11 @@ import kotlinx.coroutines.launch
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.workouttracker.viewmodel.NutritionViewModel
 import com.example.workouttracker.ui.components.SectionHeader
-import com.example.workouttracker.ui.nutrition.FridgeDialog
 import com.example.workouttracker.ui.nutrition.FridgeManagerDialog
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -43,11 +46,11 @@ fun NutritionScreen(
     viewModel: NutritionViewModel = viewModel()
 ) {
     val entries by viewModel.entries.collectAsState()
+    val recommendedNorm by viewModel.recommendedNorm.collectAsState()
+    val profile by viewModel.profile.collectAsState()
     val mealPlan by viewModel.mealPlan.collectAsState()
     val isPlanLoading by viewModel.isPlanLoading.collectAsState()
     val planError by viewModel.planError.collectAsState()
-    val recommendedNorm by viewModel.recommendedNorm.collectAsState()
-    val profile by viewModel.profile.collectAsState()
     val planMessage by viewModel.planMessage.collectAsState()
     val fridgePrompt by viewModel.fridgeExtraPrompt.collectAsState()
 
@@ -55,26 +58,20 @@ fun NutritionScreen(
     var editEntry by remember { mutableStateOf<NutritionEntry?>(null) }
     var showSettings by remember { mutableStateOf(false) }
     var showProfileDialog by remember { mutableStateOf(false) }
+    var showFridgeManagerDialog by remember { mutableStateOf(false) }
     var showReplaceDialog by remember { mutableStateOf(false) }
     var replaceMealType by remember { mutableStateOf<MealType?>(null) }
     var replaceComment by remember { mutableStateOf("") }
     var showFridgeChoiceDialog by remember { mutableStateOf(false) }
     var showRegenerateWarning by remember { mutableStateOf(false) }
     var showFridgeDialog by remember { mutableStateOf(false) }
-    var showFridgeManagerDialog by remember { mutableStateOf(false) }
+    var showMealPlanSheet by remember { mutableStateOf(false) }
 
     val snackbarHost = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()                // ← добавили
     suspend fun snack(msg: String) { snackbarHost.showSnackbar(msg) }
 
     val grouped = entries.groupBy { it.date }.toSortedMap(compareByDescending { it })
-    val mealTypeOrder = listOf(
-        MealType.BREAKFAST,
-        MealType.LUNCH,
-        MealType.DINNER,
-        MealType.SNACK,
-        MealType.OTHER
-    )
     val formatter = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()) }
     val today = formatter.format(Date())
     val yesterday = remember(today) {
@@ -83,6 +80,7 @@ fun NutritionScreen(
             add(Calendar.DAY_OF_YEAR, -1)
         }.let { formatter.format(it.time) }
     }
+    val canReuseYesterdayPlan = mealPlan == null && viewModel.hasCachedPlanForDate(yesterday)
     val todayEntries = grouped[today].orEmpty()
     val todaySummary = viewModel.getDailySummary(today)
     val todayTotal = NutritionEntry(
@@ -94,8 +92,13 @@ fun NutritionScreen(
         fats = todaySummary.fats,
         weight = todayEntries.sumOf { it.weight }
     )
-
-    val canReuseYesterdayPlan = mealPlan == null && viewModel.hasCachedPlanForDate(yesterday)
+    val mealTypeOrder = listOf(
+        MealType.BREAKFAST,
+        MealType.LUNCH,
+        MealType.DINNER,
+        MealType.SNACK,
+        MealType.OTHER
+    )
 
     LaunchedEffect(planMessage) {
         planMessage?.let {
@@ -103,8 +106,6 @@ fun NutritionScreen(
             viewModel.consumePlanMessage()
         }
     }
-
-
 
     Scaffold(
         topBar = {
@@ -124,100 +125,159 @@ fun NutritionScreen(
                 }
             )
         },
-        floatingActionButton = {
-            FloatingActionButton(onClick = { showAddDialog = true }) {
-                Icon(Icons.Filled.Add, contentDescription = "Добавить")
-            }
-        },
         snackbarHost = { SnackbarHost(snackbarHost) }
     ) { padding ->
-        LazyColumn(
+        Box(
             modifier = Modifier
                 .padding(padding)
-                .fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .fillMaxSize()
         ) {
-            item { TodayCard(todayTotal, viewModel.dailyNorm) }
-            item {
-                MealPlanCard(
-                    mealPlan = mealPlan,
-                    isLoading = isPlanLoading,
-                    error = planError,
-                    onGenerateClick = {
-                        val planExists = mealPlan != null || viewModel.hasCachedPlanForDate(today)
-                        if (planExists) {
-                            showRegenerateWarning = true
-                        } else {
-                            showFridgeChoiceDialog = true
-                        }
-                    },
-                    onDismissError = { viewModel.clearPlanError() },
-                    onReplaceMeal = { type ->
-                        replaceMealType = type
-                        replaceComment = ""
-                        showReplaceDialog = true
-                    },
-                    canReuseYesterdayPlan = canReuseYesterdayPlan,
-                    onReuseYesterdayClick = { viewModel.reuseYesterdayPlan() }
-                )
-            }
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 104.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                item { TodayCard(todayTotal, viewModel.dailyNorm) }
 
-            grouped.forEach { (date, _) ->
-                stickyHeader {
-                    Surface(tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(
-                                    Brush.horizontalGradient(
-                                        listOf(
-                                            MaterialTheme.colorScheme.primaryContainer,
-                                            MaterialTheme.colorScheme.tertiaryContainer
+                grouped.forEach { (date, _) ->
+                    stickyHeader {
+                        Surface(tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(
+                                        Brush.horizontalGradient(
+                                            listOf(
+                                                MaterialTheme.colorScheme.primaryContainer,
+                                                MaterialTheme.colorScheme.tertiaryContainer
+                                            )
                                         )
                                     )
+                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                            ) {
+                                Text(
+                                    text = formatDateForDisplay(date),
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                                 )
-                                .padding(horizontal = 12.dp, vertical = 8.dp)
-                        ) {
-                            Text(
-                                text = formatDateForDisplay(date),
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                            )
+                            }
+                        }
+                    }
+
+                    val byMealType = viewModel.getEntriesByDate(date)
+
+                    mealTypeOrder.forEach { type ->
+                        val entriesForType = byMealType[type].orEmpty()
+                        if (entriesForType.isNotEmpty()) {
+                            item { MealTypeHeader(type) }
+
+                            items(entriesForType, key = { it.id }) { entry ->
+                                NutritionEntryCard(
+                                    entry = entry,
+                                    onEdit = { editEntry = entry },
+                                    onDelete = {
+                                        viewModel.removeEntry(entry.id)
+                                        scope.launch { snack("Удалено: ${entry.name}") }
+                                    }
+                                )
+                            }
+
+                            item { Spacer(Modifier.height(8.dp)) }
                         }
                     }
                 }
 
-                val byMealType = viewModel.getEntriesByDate(date)
-
-                mealTypeOrder.forEach { type ->
-                    val entriesForType = byMealType[type].orEmpty()
-                    if (entriesForType.isNotEmpty()) {
-                        item { MealTypeHeader(type) }
-
-                        items(entriesForType, key = { it.id }) { entry ->
-                            NutritionEntryCard(
-                                entry = entry,
-                                onEdit = { editEntry = entry },
-                                onDelete = {
-                                    viewModel.removeEntry(entry.id)
-                                    scope.launch { snack("Удалено: ${entry.name}") }   // ← заменили LaunchedEffect
-                                }
-                            )
+                if (grouped.isEmpty()) {
+                    item {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("Нет записей", style = MaterialTheme.typography.bodyLarge)
                         }
-
-                        item { Spacer(Modifier.height(8.dp)) }
                     }
                 }
             }
 
-            if (grouped.isEmpty()) {
-                item {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("Нет записей", style = MaterialTheme.typography.bodyLarge)
-                    }
-                }
+            FloatingActionButton(
+                onClick = { showMealPlanSheet = true },
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(16.dp)
+            ) {
+                Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = "План питания")
             }
 
+            FloatingActionButton(
+                onClick = { showAddDialog = true },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp)
+            ) {
+                Icon(Icons.Filled.Add, contentDescription = "Добавить")
+            }
+        }
+    }
+
+    if (showAddDialog) {
+        AddNutritionDialog(
+            viewModel = viewModel,
+            onConfirm = { newEntry ->
+                viewModel.addEntry(newEntry)
+                showAddDialog = false
+                scope.launch { snack("Добавлено: ${newEntry.name}") }   // ← заменили LaunchedEffect
+            },
+            onDismiss = { showAddDialog = false }
+        )
+    }
+
+    editEntry?.let { entry ->
+        AddNutritionDialog(
+            viewModel = viewModel,
+            entry = entry,
+            onConfirm = { updated ->
+                viewModel.updateEntry(updated)
+                editEntry = null
+                scope.launch { snack("Обновлено: ${updated.name}") }    // ← заменили LaunchedEffect
+            },
+            onDismiss = { editEntry = null }
+        )
+    }
+
+    if (showSettings) {
+        SettingsDialog(
+            currentNorm = viewModel.dailyNorm,
+            recommendedNorm = recommendedNorm,
+            onSave = { norm ->
+                viewModel.updateNorm(norm)
+                showSettings = false
+                scope.launch { snack("Нормы сохранены") }               // ← заменили LaunchedEffect
+            },
+            onDismiss = { showSettings = false }
+        )
+    }
+
+    if (showMealPlanSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showMealPlanSheet = false }
+        ) {
+            MealPlanSheetContent(
+                mealPlan = mealPlan,
+                isLoading = isPlanLoading,
+                error = planError,
+                canReuseYesterdayPlan = canReuseYesterdayPlan,
+                onDismissError = { viewModel.clearPlanError() },
+                onGenerateOrUpdate = {
+                    val planExists = mealPlan != null || viewModel.hasCachedPlanForDate(today)
+                    if (planExists) {
+                        showRegenerateWarning = true
+                    } else {
+                        showFridgeChoiceDialog = true
+                    }
+                },
+                onReuseYesterday = { viewModel.reuseYesterdayPlan() },
+                onReplaceMeal = { type ->
+                    replaceMealType = type
+                    replaceComment = ""
+                    showReplaceDialog = true
+                }
+            )
         }
     }
 
@@ -293,44 +353,6 @@ fun NutritionScreen(
             dismissButton = {
                 TextButton(onClick = { viewModel.continueWithoutExtraProducts() }) { Text("Нет") }
             }
-        )
-    }
-
-    if (showAddDialog) {
-        AddNutritionDialog(
-            viewModel = viewModel,
-            onConfirm = { newEntry ->
-                viewModel.addEntry(newEntry)
-                showAddDialog = false
-                scope.launch { snack("Добавлено: ${newEntry.name}") }   // ← заменили LaunchedEffect
-            },
-            onDismiss = { showAddDialog = false }
-        )
-    }
-
-    editEntry?.let { entry ->
-        AddNutritionDialog(
-            viewModel = viewModel,
-            entry = entry,
-            onConfirm = { updated ->
-                viewModel.updateEntry(updated)
-                editEntry = null
-                scope.launch { snack("Обновлено: ${updated.name}") }    // ← заменили LaunchedEffect
-            },
-            onDismiss = { editEntry = null }
-        )
-    }
-
-    if (showSettings) {
-        SettingsDialog(
-            currentNorm = viewModel.dailyNorm,
-            recommendedNorm = recommendedNorm,
-            onSave = { norm ->
-                viewModel.updateNorm(norm)
-                showSettings = false
-                scope.launch { snack("Нормы сохранены") }               // ← заменили LaunchedEffect
-            },
-            onDismiss = { showSettings = false }
         )
     }
 
@@ -592,11 +614,8 @@ fun MealPlanCard(
     mealPlan: MealPlan?,
     isLoading: Boolean,
     error: String?,
-    onGenerateClick: () -> Unit,
     onDismissError: () -> Unit,
-    onReplaceMeal: (MealType) -> Unit,
-    canReuseYesterdayPlan: Boolean,
-    onReuseYesterdayClick: () -> Unit
+    onReplaceMeal: (MealType) -> Unit
 ) {
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
@@ -623,24 +642,27 @@ fun MealPlanCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(
-                    text = "План питания",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                )
-                Button(
-                    onClick = onGenerateClick,
-                    enabled = !isLoading
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = "План питания",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                    Text(
+                        text = "План на сегодня и замена отдельных приёмов",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.65f)
                 ) {
-                    if (isLoading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text("Генерация...")
-                    } else {
-                        Text(if (mealPlan == null) "Сгенерировать" else "Обновить")
-                    }
+                    Icon(
+                        imageVector = Icons.Filled.AutoAwesome,
+                        contentDescription = null,
+                        modifier = Modifier.padding(8.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
                 }
             }
 
@@ -716,14 +738,70 @@ fun MealPlanCard(
                     text = "План на сегодня ещё не создан.",
                     style = MaterialTheme.typography.bodySmall
                 )
-                if (canReuseYesterdayPlan) {
-                    Spacer(Modifier.height(8.dp))
-                    Button(onClick = onReuseYesterdayClick, enabled = !isLoading) {
-                        Text("Использовать вчерашний план")
-                    }
-                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "Нажмите «Сгенерировать план», чтобы получить рацион на сегодня.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }
 }
 
+@Composable
+private fun MealPlanSheetContent(
+    mealPlan: MealPlan?,
+    isLoading: Boolean,
+    error: String?,
+    canReuseYesterdayPlan: Boolean,
+    onDismissError: () -> Unit,
+    onGenerateOrUpdate: () -> Unit,
+    onReuseYesterday: () -> Unit,
+    onReplaceMeal: (MealType) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(
+            text = "План питания",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold
+        )
+        FilledTonalButton(
+            onClick = onGenerateOrUpdate,
+            enabled = !isLoading,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            if (isLoading) {
+                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
+                Text("Генерация...")
+            } else {
+                Text(if (mealPlan == null) "Сгенерировать план" else "Перегенерировать план")
+            }
+        }
+        if (canReuseYesterdayPlan) {
+            OutlinedButton(
+                onClick = onReuseYesterday,
+                enabled = !isLoading,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Взять вчерашний план")
+            }
+        }
+
+        MealPlanCard(
+            mealPlan = mealPlan,
+            isLoading = isLoading,
+            error = error,
+            onDismissError = onDismissError,
+            onReplaceMeal = onReplaceMeal
+        )
+
+        Spacer(Modifier.height(16.dp))
+    }
+}
