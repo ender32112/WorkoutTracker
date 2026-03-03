@@ -11,7 +11,6 @@ sealed class BottomNavItem(
 ) {
     data object Training : BottomNavItem("training", Icons.Default.FitnessCenter, "Тренировки")
     data object Nutrition : BottomNavItem("nutrition", Icons.Default.RestaurantMenu, "Питание")
-    data object MealPlan : BottomNavItem("meal_plan", Icons.AutoMirrored.Filled.MenuBook, "План")
     data object Analytics : BottomNavItem("analytics", Icons.Default.BarChart, "Аналитика")
     data object Articles : BottomNavItem("articles", Icons.Default.Article, "Статьи")
     data object Achieve : BottomNavItem("achievements", Icons.Default.Star, "Достижения")
