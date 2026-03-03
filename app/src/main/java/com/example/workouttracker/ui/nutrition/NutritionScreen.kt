@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Kitchen
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -35,6 +36,7 @@ import com.example.workouttracker.viewmodel.NutritionViewModel
 import com.example.workouttracker.ui.components.SectionHeader
 import com.example.workouttracker.ui.nutrition.FridgeManagerDialog
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
@@ -46,12 +48,24 @@ fun NutritionScreen(
     val entries by viewModel.entries.collectAsState()
     val recommendedNorm by viewModel.recommendedNorm.collectAsState()
     val profile by viewModel.profile.collectAsState()
+    val mealPlan by viewModel.mealPlan.collectAsState()
+    val isPlanLoading by viewModel.isPlanLoading.collectAsState()
+    val planError by viewModel.planError.collectAsState()
+    val planMessage by viewModel.planMessage.collectAsState()
+    val fridgePrompt by viewModel.fridgeExtraPrompt.collectAsState()
 
     var showAddDialog by remember { mutableStateOf(false) }
     var editEntry by remember { mutableStateOf<NutritionEntry?>(null) }
     var showSettings by remember { mutableStateOf(false) }
     var showProfileDialog by remember { mutableStateOf(false) }
     var showFridgeManagerDialog by remember { mutableStateOf(false) }
+    var showReplaceDialog by remember { mutableStateOf(false) }
+    var replaceMealType by remember { mutableStateOf<MealType?>(null) }
+    var replaceComment by remember { mutableStateOf("") }
+    var showFridgeChoiceDialog by remember { mutableStateOf(false) }
+    var showRegenerateWarning by remember { mutableStateOf(false) }
+    var showFridgeDialog by remember { mutableStateOf(false) }
+    var showMealPlanSheet by remember { mutableStateOf(false) }
 
     val snackbarHost = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()                // ← добавили
@@ -60,6 +74,13 @@ fun NutritionScreen(
     val grouped = entries.groupBy { it.date }.toSortedMap(compareByDescending { it })
     val formatter = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()) }
     val today = formatter.format(Date())
+    val yesterday = remember(today) {
+        Calendar.getInstance().apply {
+            time = Date()
+            add(Calendar.DAY_OF_YEAR, -1)
+        }.let { formatter.format(it.time) }
+    }
+    val canReuseYesterdayPlan = mealPlan == null && viewModel.hasCachedPlanForDate(yesterday)
     val todayEntries = grouped[today].orEmpty()
     val todaySummary = viewModel.getDailySummary(today)
     val todayTotal = NutritionEntry(
@@ -79,6 +100,12 @@ fun NutritionScreen(
         MealType.OTHER
     )
 
+    LaunchedEffect(planMessage) {
+        planMessage?.let {
+            snack(it)
+            viewModel.consumePlanMessage()
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -169,6 +196,15 @@ fun NutritionScreen(
             }
 
             FloatingActionButton(
+                onClick = { showMealPlanSheet = true },
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(16.dp)
+            ) {
+                Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = "План питания")
+            }
+
+            FloatingActionButton(
                 onClick = { showAddDialog = true },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -214,6 +250,143 @@ fun NutritionScreen(
                 scope.launch { snack("Нормы сохранены") }               // ← заменили LaunchedEffect
             },
             onDismiss = { showSettings = false }
+        )
+    }
+
+    if (showMealPlanSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showMealPlanSheet = false }
+        ) {
+            MealPlanSheetContent(
+                mealPlan = mealPlan,
+                isLoading = isPlanLoading,
+                error = planError,
+                canReuseYesterdayPlan = canReuseYesterdayPlan,
+                onDismissError = { viewModel.clearPlanError() },
+                onGenerateOrUpdate = {
+                    val planExists = mealPlan != null || viewModel.hasCachedPlanForDate(today)
+                    if (planExists) {
+                        showRegenerateWarning = true
+                    } else {
+                        showFridgeChoiceDialog = true
+                    }
+                },
+                onReuseYesterday = { viewModel.reuseYesterdayPlan() },
+                onReplaceMeal = { type ->
+                    replaceMealType = type
+                    replaceComment = ""
+                    showReplaceDialog = true
+                }
+            )
+        }
+    }
+
+    if (showRegenerateWarning) {
+        AlertDialog(
+            onDismissRequest = { showRegenerateWarning = false },
+            title = { Text("Обновить план") },
+            text = { Text("Текущий план будет удалён. Продолжить генерацию заново?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showRegenerateWarning = false
+                        viewModel.resetTodayPlan()
+                        showFridgeChoiceDialog = true
+                    },
+                    enabled = !isPlanLoading
+                ) {
+                    Text("Продолжить")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRegenerateWarning = false }) {
+                    Text("Отмена")
+                }
+            }
+        )
+    }
+
+    if (showFridgeChoiceDialog) {
+        AlertDialog(
+            onDismissRequest = { showFridgeChoiceDialog = false },
+            title = { Text("Сформировать план") },
+            text = { Text("Хотите использовать продукты из холодильника?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showFridgeChoiceDialog = false
+                    showFridgeDialog = true
+                }) {
+                    Text("Да")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showFridgeChoiceDialog = false
+                    viewModel.generateTodayPlan()
+                }) {
+                    Text("Нет")
+                }
+            }
+        )
+    }
+
+    if (showFridgeDialog) {
+        FridgeDialog(
+            onConfirm = { fridge, allowExtra ->
+                showFridgeDialog = false
+                viewModel.generatePlanFromFridge(fridge, allowExtra)
+            },
+            onDismiss = { showFridgeDialog = false }
+        )
+    }
+
+    fridgePrompt?.let {
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("Недостаточно продуктов") },
+            text = {
+                Text("Эти продукты не покрывают вашу дневную норму. Разрешить использование дополнительных продуктов?")
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.allowExtraProductsForFridgePlan() }) { Text("Да") }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.continueWithoutExtraProducts() }) { Text("Нет") }
+            }
+        )
+    }
+
+    if (showReplaceDialog && replaceMealType != null) {
+        AlertDialog(
+            onDismissRequest = { showReplaceDialog = false },
+            title = { Text("Замена приёма пищи") },
+            text = {
+                OutlinedTextField(
+                    value = replaceComment,
+                    onValueChange = { replaceComment = it },
+                    label = { Text("Комментарий (необязательно)") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.replaceMeal(
+                            replaceMealType!!,
+                            replaceComment.trim().ifBlank { null }
+                        )
+                        showReplaceDialog = false
+                    },
+                    enabled = !isPlanLoading
+                ) {
+                    Text("Заменить")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showReplaceDialog = false }) {
+                    Text("Отмена")
+                }
+            }
         )
     }
 
@@ -475,7 +648,7 @@ fun MealPlanCard(
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                     )
                     Text(
-                        text = "Управление через иконку внизу слева",
+                        text = "План на сегодня и замена отдельных приёмов",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -567,7 +740,7 @@ fun MealPlanCard(
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = "Нажмите на иконку книги слева внизу, чтобы быстро создать или обновить план.",
+                    text = "Нажмите «Сгенерировать план», чтобы получить рацион на сегодня.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -577,43 +750,58 @@ fun MealPlanCard(
 }
 
 @Composable
-private fun MealPlanActionsDialog(
+private fun MealPlanSheetContent(
     mealPlan: MealPlan?,
     isLoading: Boolean,
+    error: String?,
     canReuseYesterdayPlan: Boolean,
-    onDismiss: () -> Unit,
+    onDismissError: () -> Unit,
     onGenerateOrUpdate: () -> Unit,
-    onReuseYesterday: () -> Unit
+    onReuseYesterday: () -> Unit,
+    onReplaceMeal: (MealType) -> Unit
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Управление планом") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    text = "Выберите действие для плана питания",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                FilledTonalButton(onClick = onGenerateOrUpdate, enabled = !isLoading, modifier = Modifier.fillMaxWidth()) {
-                    if (isLoading) {
-                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Генерация...")
-                    } else {
-                        Text(if (mealPlan == null) "Сформировать план" else "Пересобрать план")
-                    }
-                }
-                if (canReuseYesterdayPlan) {
-                    OutlinedButton(onClick = onReuseYesterday, enabled = !isLoading, modifier = Modifier.fillMaxWidth()) {
-                        Text("Использовать вчерашний план")
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Закрыть")
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(
+            text = "План питания",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold
+        )
+        FilledTonalButton(
+            onClick = onGenerateOrUpdate,
+            enabled = !isLoading,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            if (isLoading) {
+                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
+                Text("Генерация...")
+            } else {
+                Text(if (mealPlan == null) "Сгенерировать план" else "Перегенерировать план")
             }
         }
-    )
+        if (canReuseYesterdayPlan) {
+            OutlinedButton(
+                onClick = onReuseYesterday,
+                enabled = !isLoading,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Взять вчерашний план")
+            }
+        }
+
+        MealPlanCard(
+            mealPlan = mealPlan,
+            isLoading = isLoading,
+            error = error,
+            onDismissError = onDismissError,
+            onReplaceMeal = onReplaceMeal
+        )
+
+        Spacer(Modifier.height(16.dp))
+    }
 }
