@@ -14,7 +14,7 @@ data class FoodBehaviorStats(
 
 class BehaviorPreferencesRepository(context: Context, userId: String) {
 
-    private val prefs = context.getSharedPreferences("behavior_prefs_$userId", Context.MODE_PRIVATE)
+    private val prefs = context.getSharedPreferences("behavior_prefs_${'$'}userId", Context.MODE_PRIVATE)
     private val gson = Gson()
 
     private fun loadStats(): MutableMap<String, FoodBehaviorStats> {

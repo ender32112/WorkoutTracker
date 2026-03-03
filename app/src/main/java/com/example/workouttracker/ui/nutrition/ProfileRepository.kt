@@ -4,8 +4,8 @@ import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
 
-class ProfileRepository(context: Context, userId: String) {
-    private val prefs = context.getSharedPreferences("nutrition_profile_prefs_$userId", Context.MODE_PRIVATE)
+class ProfileRepository(context: Context) {
+    private val prefs = context.getSharedPreferences("nutrition_profile_prefs", Context.MODE_PRIVATE)
 
     fun loadProfile(): NutritionProfile? {
         val sexName = prefs.getString(KEY_SEX, null) ?: return null
