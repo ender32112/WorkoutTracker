@@ -50,6 +50,7 @@ import com.example.workouttracker.ui.articles.ArticlesScreen
 import com.example.workouttracker.ui.profile.ProfileScreen
 import com.example.workouttracker.ui.theme.ThemeVariant
 import com.example.workouttracker.ui.training.TrainingScreen
+import com.example.workouttracker.ui.nutrition.MealPlanScreen
 import com.example.workouttracker.ui.nutrition.NutritionScreen
 import com.example.workouttracker.viewmodel.AchievementViewModel
 import com.example.workouttracker.viewmodel.AchievementViewModelFactory
@@ -81,6 +82,7 @@ fun MainScreen(
         listOf(
             BottomNavItem.Training,
             BottomNavItem.Nutrition,
+            BottomNavItem.MealPlan,
             BottomNavItem.Analytics,
             BottomNavItem.Articles,
             BottomNavItem.Achieve,
@@ -161,6 +163,7 @@ private fun MainContent(
         when (route) {
             BottomNavItem.Training.route -> TrainingScreen(trainingViewModel)
             BottomNavItem.Nutrition.route -> NutritionScreen()
+            BottomNavItem.MealPlan.route -> MealPlanScreen()
             BottomNavItem.Analytics.route -> AnalyticsScreen()
             BottomNavItem.Articles.route -> ArticlesScreen(trainingViewModel, articleViewModel)
             BottomNavItem.Achieve.route -> AchievementsScreen(achievementViewModel = achievementViewModel)
