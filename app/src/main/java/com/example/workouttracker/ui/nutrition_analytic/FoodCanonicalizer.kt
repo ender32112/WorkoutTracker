@@ -72,6 +72,10 @@ class FoodCanonicalizer(
 
     private val unitRegex = "(?i)(кг|г|гр|грамм|мг|л|мл|шт|pieces|pcs)".toRegex()
     private val quantityRegex = "(\\d+[.,]?\\d*)\\s*${unitRegex.pattern}".toRegex()
+    private val cookingDescriptors = setOf(
+        "вареный", "варёный", "запеченный", "запечённый", "жареный", "тушеный", "тушёный",
+        "отварной", "гриль", "печеный", "печёный", "свежий", "домашний", "на", "пару"
+    )
 
     private data class PreprocessResult(
         val cleaned: String,
@@ -97,7 +101,15 @@ class FoodCanonicalizer(
             .replace("\\s+".toRegex(), " ")
             .trim()
 
-        return PreprocessResult(cleaned, descriptors)
+        val normalizedTokens = cleaned
+            .split(" ")
+            .filter { it.isNotBlank() }
+            .map { heuristicLemma(it) }
+            .filterNot { it in cookingDescriptors }
+
+        val finalCleaned = normalizedTokens.joinToString(" ").trim()
+
+        return PreprocessResult(finalCleaned, descriptors)
     }
 
     private fun heuristicLemma(word: String): String {
@@ -108,7 +120,7 @@ class FoodCanonicalizer(
         )
         exceptions[lowered]?.let { return it }
 
-        val endings = listOf("ов", "ев", "ей", "ами", "ями", "ями", "ями", "ями", "ами", "ями")
+        val endings = listOf("ов", "ев", "ей", "ами", "ями", "ах", "ях")
         endings.firstOrNull { lowered.endsWith(it) }?.let { suffix ->
             return lowered.removeSuffix(suffix)
         }
@@ -175,7 +187,7 @@ class FoodCanonicalizer(
             }
         }
 
-        val threshold = 0.7
+        val threshold = 0.74
         return best?.takeIf { it.second >= threshold }?.first
     }
 
