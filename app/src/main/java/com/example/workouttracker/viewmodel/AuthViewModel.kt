@@ -216,7 +216,6 @@ class AuthViewModel @Inject constructor(
             viewModelScope.launch { writeUser(migratedUser) }
 
             migrateSharedPrefs("training_prefs", "training_prefs_$userId")
-            migrateSharedPrefs("article_prefs", "article_prefs_$userId")
             migrateSharedPrefs("nutrition_prefs", "nutrition_prefs_$userId")
             migrateSharedPrefs("analytics_prefs", "analytics_prefs_$userId")
 

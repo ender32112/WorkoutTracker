@@ -3,7 +3,6 @@ package com.example.workouttracker.data.local
 import android.content.Context
 import com.example.workouttracker.core.auth.AuthSessionStore
 import com.example.workouttracker.data.settings.AppSettingsDataStore
-import com.example.workouttracker.feature.articles.presentation.defaultArticleCatalog
 import dagger.hilt.android.qualifiers.ApplicationContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -26,7 +25,6 @@ class LegacyDataMigrator @Inject constructor(
             migrateUserProfile(userId)
             migrateNutrition(userId)
             migrateAnalytics(userId)
-            migrateArticles(userId)
         }
     }
 
@@ -241,27 +239,6 @@ class LegacyDataMigrator @Inject constructor(
         if (!todayDate.isNullOrBlank() && todaySteps >= 0L) {
             dao.deleteStepEntryByDate(userId, todayDate)
             dao.upsertStepEntry(StepEntryEntity(userId = userId, dateIso = todayDate, steps = todaySteps))
-        }
-        settings.markMigrationCompleted(token)
-    }
-
-    private suspend fun migrateArticles(userId: String) {
-        val token = "$userId:articles"
-        if (settings.hasCompletedMigration(token)) return
-        val prefs = context.getSharedPreferences("article_prefs_$userId", Context.MODE_PRIVATE)
-        val existingIds = dao.getArticlePurchasesOnce(userId).map { it.articleId }.toSet()
-        defaultArticleCatalog().forEach { article ->
-            val key = "purchased_${article.id}"
-            if (prefs.getBoolean(key, false) && article.id.toString() !in existingIds) {
-                dao.upsertArticlePurchase(
-                    ArticlePurchaseEntity(
-                        userId = userId,
-                        articleId = article.id.toString(),
-                        cost = article.cost,
-                        purchasedAt = System.currentTimeMillis()
-                    )
-                )
-            }
         }
         settings.markMigrationCompleted(token)
     }

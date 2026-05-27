@@ -298,21 +298,3 @@ data class MealPlanEntity(
     val payloadJson: String,
     val updatedAt: Long = System.currentTimeMillis()
 )
-
-@Entity(
-    tableName = "article_purchases",
-    foreignKeys = [ForeignKey(
-        entity = UserEntity::class,
-        parentColumns = ["id"],
-        childColumns = ["userId"],
-        onDelete = ForeignKey.CASCADE
-    )],
-    indices = [Index("userId"), Index(value = ["userId", "articleId"], unique = true)]
-)
-data class ArticlePurchaseEntity(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val userId: String,
-    val articleId: String,
-    val cost: Int,
-    val purchasedAt: Long = System.currentTimeMillis()
-)

@@ -277,18 +277,6 @@ interface WorkoutTrackerDao {
     @Query("SELECT * FROM meal_plans WHERE userId = :userId AND dateIso = :dateIso LIMIT 1")
     fun observeMealPlan(userId: String, dateIso: String): Flow<MealPlanEntity?>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsertArticlePurchase(entry: ArticlePurchaseEntity)
-
-    @Query("SELECT * FROM article_purchases WHERE userId = :userId ORDER BY purchasedAt DESC")
-    fun observeArticlePurchases(userId: String): Flow<List<ArticlePurchaseEntity>>
-
-    @Query("SELECT * FROM article_purchases WHERE userId = :userId")
-    suspend fun getArticlePurchasesOnce(userId: String): List<ArticlePurchaseEntity>
-
-    @Query("SELECT COALESCE(SUM(cost), 0) FROM article_purchases WHERE userId = :userId")
-    fun observeArticleSpentPoints(userId: String): Flow<Int>
-
     @Transaction
     suspend fun persistWorkoutPerformed(
         userId: String,

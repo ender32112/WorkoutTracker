@@ -4,7 +4,6 @@ import com.example.workouttracker.data.exercise.ExerciseCatalogDao
 import com.example.workouttracker.data.exercise.ExerciseRepository
 import com.example.workouttracker.data.exercise.ExerciseSeedLoader
 import com.example.workouttracker.data.local.AnalyticsRepository
-import com.example.workouttracker.data.local.ArticleRepository
 import com.example.workouttracker.data.local.NutritionRepository
 import com.example.workouttracker.data.local.UserRepository
 import com.example.workouttracker.data.local.WorkoutTrackerDao
@@ -43,12 +42,6 @@ object RepositoryModule {
     fun provideWeightSyncRepository(
         dao: WorkoutTrackerDao
     ): WeightSyncRepository = WeightSyncRepository(dao)
-
-    @Provides
-    @Singleton
-    fun provideArticleRepository(
-        dao: WorkoutTrackerDao
-    ): ArticleRepository = ArticleRepository(dao)
 
     @Provides
     @Singleton
