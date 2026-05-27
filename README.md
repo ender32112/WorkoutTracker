@@ -1,84 +1,169 @@
 # WorkoutTracker
 
-WorkoutTracker is an Android app on Kotlin + Jetpack Compose for tracking workouts, nutrition, progress, and profile data. The current version uses local persistence with user separation and a main navigation of four sections: Training, Nutrition, Analytics, and Profile.
+`WorkoutTracker` — Android-приложение на `Kotlin` и `Jetpack Compose` для ведения тренировок, питания, аналитики и личного профиля. Проект использует локальное хранение данных, разделение данных по пользователям и единую оболочку с нижней навигацией.
 
-## Current functionality
+## Что есть в приложении сейчас
 
-### Training
+### Тренировки
 
-- Workout list and workout history
-- Templates and reusable training scenarios
-- Exercise library with built-in catalog
-- Custom exercises, favorites, and recent exercises
-- Logging sets, reps, and weight
-- Saving active workout state
+- список тренировок и история выполненных сессий;
+- шаблоны тренировок;
+- встроенный каталог упражнений;
+- пользовательские упражнения;
+- избранные и недавно использованные упражнения;
+- ведение подходов, повторений и веса;
+- сохранение состояния активной тренировки.
 
-### Nutrition
+### Питание
 
-- Food diary with meals and daily entries
-- Nutrition profile and personal calorie/macronutrient targets
-- Meal plan generation and reuse
-- Fridge inventory
-- Barcode scanning for products
-- Product cache for repeated lookups
-- Manual and quick product entry flows
+- дневник питания по приёмам пищи;
+- профиль питания и персональные нормы КБЖУ;
+- генерация и повторное использование плана питания;
+- холодильник с продуктами;
+- быстрое добавление продуктов;
+- сканирование штрихкодов;
+- локальный кэш продуктов для повторных поисков.
 
-### Analytics
+### Аналитика
 
-- Step tracking
-- Weight history
-- Nutrition summaries
-- Best exercises and training metrics
-- Weather block
-- Analytics settings
-- Health Connect integration for supported step scenarios
+- учёт шагов;
+- история веса;
+- сводки по питанию;
+- лучшие упражнения и тренировочные метрики;
+- погодный блок;
+- настройки аналитики;
+- интеграция с `Health Connect` для сценариев, где она поддерживается.
 
-### Profile
+### Профиль
 
-- Registration and login
-- Personal data editing
-- Goal and measurement tracking
-- Avatar selection
-- Theme switching
+- регистрация и вход;
+- редактирование личных данных;
+- цели и антропометрия;
+- выбор аватара;
+- переключение темы приложения.
 
-## Navigation
+## Навигация
 
-Bottom navigation currently contains:
+В нижней навигации приложения сейчас доступны 4 раздела:
 
-1. Training
-2. Nutrition
-3. Analytics
-4. Profile
+1. Тренировки
+2. Питание
+3. Аналитика
+4. Профиль
 
-## Tech stack
+## Архитектура
 
-- Kotlin
-- Jetpack Compose
-- Navigation Compose
-- Hilt
-- Room
-- DataStore
-- WorkManager
-- Retrofit + Gson + OkHttp
-- Coil
-- ML Kit Barcode Scanning
-- CameraX
-- Health Connect
-- Google Play Services Location / Fitness
-- MPAndroidChart
+Текущая архитектурная ось проекта:
 
-## Data storage
+`UI / Route -> ViewModel -> Repository / DAO -> Room / DataStore / SharedPreferences`
 
-The app currently stores data locally:
+Ключевые особенности:
 
-- `Room` for core user, training, nutrition, analytics, and cache data
-- `DataStore` for app settings
-- `SharedPreferences` only for legacy migration / compatibility paths
-- Local files for selected images
+- проект собран в одном Gradle-модуле `:app`;
+- dependency injection построен на `Hilt`;
+- основные пользовательские сценарии находятся в `feature/*`;
+- глобальная навигация состоит из маршрутов `login`, `register`, `main`;
+- настройки приложения вынесены в `AppSettingsDataStore`;
+- legacy-данные мигрируются в актуальные хранилища через `LegacyDataMigrator`.
 
-## Local configuration
+## Основные экраны и слои
 
-Some integrations require local keys in `local.properties`.
+### Точки входа
+
+- `WorkoutTrackerApp` — точка входа приложения с `@HiltAndroidApp`;
+- `MainActivity` — поднимает Compose, тему, навигацию, миграции и фоновые сценарии;
+- `ui/navigation/NavGraph.kt` — глобальные маршруты приложения;
+- `ui/navigation/MainScreen.kt` — оболочка с нижней навигацией и общими `ViewModel`.
+
+### Активные feature-пакеты
+
+- `feature/training/presentation`
+- `feature/nutrition/presentation`
+- `feature/analytics/presentation`
+- `feature/analytics/runtime`
+- `feature/profile/presentation`
+
+## Хранение данных
+
+### Room
+
+Основное хранилище — `Room` база `workout_tracker.db`.
+
+- текущая версия базы: `9`;
+- основные данные пользователя, тренировок, питания, шагов, веса и локальных кэшей хранятся именно здесь;
+- база также содержит миграции со старых форматов хранения.
+
+Основные таблицы:
+
+- `users` — профиль пользователя;
+- `nutrition_profiles` — профиль питания и нормы;
+- `weight_entries` — история веса;
+- `step_entries` — история шагов;
+- `workout_templates` и `workout_template_exercise` — шаблоны тренировок;
+- `workout_session_performed`, `workout_performed_exercise`, `workout_set_performed` — завершённые тренировки;
+- `active_workout_state` — сохранение активной тренировки;
+- `nutrition_entries` — дневник питания;
+- `fridge_items` — продукты в холодильнике;
+- `product_cache` — локальный кэш продуктов по штрихкоду;
+- `meal_plans` — сохранённые планы питания;
+- `exercises` и `exercise_user_meta` — каталог упражнений и пользовательские метаданные.
+
+### DataStore
+
+`AppSettingsDataStore` хранит:
+
+- текущую тему;
+- цель по шагам;
+- флаг уведомлений;
+- флаги и версию загрузки каталога упражнений;
+- список завершённых миграций.
+
+### SharedPreferences
+
+`SharedPreferences` в проекте используются как вспомогательный слой:
+
+- для текущей сессии и индекса аккаунтов через `AuthSessionStore`;
+- для runtime-настроек аналитики;
+- для legacy-миграций и совместимости со старыми форматами данных;
+- для transitional-кэша некоторых сценариев генерации питания.
+
+## Внешние интеграции
+
+В проекте используются:
+
+- `Health Connect`;
+- датчик шагов Android;
+- `OpenWeather`;
+- LLM API в OpenRouter-совместимом формате для сценариев питания;
+- `CameraX + ML Kit` для сканирования штрихкодов;
+- `Coil` для загрузки изображений;
+- `WorkManager` для фонового контроля step runtime.
+
+Важно: текущий поиск продуктов по штрихкоду работает через локальный `Room`-кэш и ручное сохранение продуктов. Старый онлайн-сценарий с внешним food API в активном коде сейчас не является основным.
+
+## Технологический стек
+
+- `Kotlin`
+- `Jetpack Compose`
+- `Material 3`
+- `Navigation Compose`
+- `Hilt`
+- `Room`
+- `DataStore`
+- `WorkManager`
+- `Retrofit`
+- `OkHttp`
+- `Gson`
+- `Coil`
+- `CameraX`
+- `ML Kit Barcode Scanning`
+- `Health Connect`
+- `Google Play Services Location / Fitness`
+- `MPAndroidChart`
+
+## Локальная конфигурация
+
+Часть интеграций требует локальных значений в `local.properties`.
 
 ### Nutrition AI
 
@@ -97,13 +182,20 @@ FATSECRET_CLIENT_ID=your_client_id
 FATSECRET_CLIENT_SECRET=your_client_secret
 ```
 
-### Weather
+### Погода
 
-Add the OpenWeather key to the app resources/config used by the analytics weather block.
+Для погодного блока нужен ключ `OpenWeather`, который используется в аналитике.
 
-## Notes
+## Известные особенности проекта
 
-- Minimum SDK: `26`
-- Target / compile SDK: `36`
-- The project contains legacy migration code for older local app data formats
-- The README describes the current implemented functionality in this branch
+- проект всё ещё содержит переходные архитектурные решения после миграции со старого состояния;
+- часть крупных экранов и `ViewModel` остаются довольно большими;
+- `SharedPreferences` ещё используются для legacy-совместимости;
+- в кодовой базе есть отдельные места, которые ещё требуют дальнейшей чистки и декомпозиции.
+
+## Примечания
+
+- `minSdk = 26`
+- `targetSdk = 36`
+- `compileSdk = 36`
+- README описывает текущее состояние функционала и структуры проекта
