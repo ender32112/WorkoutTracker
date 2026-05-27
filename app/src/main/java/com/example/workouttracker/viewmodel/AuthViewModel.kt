@@ -1,16 +1,24 @@
 package com.example.workouttracker.viewmodel
 
-import android.app.Application
 import android.content.Context
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.workouttracker.core.auth.AuthSessionStore
+import com.example.workouttracker.data.local.LegacyDataMigrator
+import com.example.workouttracker.data.local.UserEntity
+import com.example.workouttracker.data.local.UserRepository
+import com.example.workouttracker.data.local.WeightSyncRepository
+import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
 import java.util.UUID
+import javax.inject.Inject
 
 data class User(
     val id: String = UUID.randomUUID().toString(),
@@ -32,9 +40,14 @@ data class User(
     val goalDeadline: String,
 )
 
-class AuthViewModel(application: Application) : AndroidViewModel(application) {
-    private val appContext = application.applicationContext
-    private val authPrefs = appContext.getSharedPreferences(AUTH_PREFS_NAME, Context.MODE_PRIVATE)
+@HiltViewModel
+class AuthViewModel @Inject constructor(
+    @ApplicationContext private val appContext: Context,
+    private val authSessionStore: AuthSessionStore,
+    private val userRepository: UserRepository,
+    private val migrator: LegacyDataMigrator,
+    private val weightSyncRepository: WeightSyncRepository
+) : ViewModel() {
 
     private val _registrationState = MutableStateFlow(false)
     val registrationState: StateFlow<Boolean> get() = _registrationState
@@ -42,7 +55,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     private val _userState = MutableStateFlow<User?>(null)
     val userState: StateFlow<User?> get() = _userState
 
-    private val _isLoggedIn = MutableStateFlow(authPrefs.getBoolean(KEY_IS_LOGGED_IN, false))
+    private val _isLoggedIn = MutableStateFlow(authSessionStore.isLoggedIn())
     val isLoggedIn: StateFlow<Boolean> = _isLoggedIn
 
     private val _authError = MutableStateFlow<String?>(null)
@@ -50,8 +63,12 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         maybeMigrateLegacyUser()
-        if (_isLoggedIn.value) {
-            loadUser()
+        viewModelScope.launch {
+            migrator.migrateAllKnownUsers()
+            if (_isLoggedIn.value) {
+                authSessionStore.currentUserIdOrNull()?.let { weightSyncRepository.harmonizeCurrentWeight(it) }
+                loadUser()
+            }
         }
     }
 
@@ -61,18 +78,21 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
             _authError.value = null
 
             val normalizedEmail = normalizeEmail(user.email)
-            val accounts = loadAccountsIndex()
-
-            if (accounts.containsKey(normalizedEmail)) {
+            val accounts = authSessionStore.loadAccountsIndex()
+            if (userRepository.getUserByEmail(normalizedEmail) != null || accounts.containsKey(normalizedEmail)) {
                 _authError.value = "Пользователь с таким email уже существует"
                 return@launch
             }
 
             val userToSave = user.copy(email = user.email.trim())
             accounts[normalizedEmail] = userToSave.id
-            saveAccountsIndex(accounts)
+            authSessionStore.saveAccountsIndex(accounts)
             writeUser(userToSave)
-            setCurrentUser(userToSave)
+            if (userToSave.weight > 0f) {
+                weightSyncRepository.saveWeightMeasurement(userToSave.id, userToSave.weight)
+            }
+            val persistedUser = userRepository.getUserById(userToSave.id)?.toDomain() ?: userToSave
+            setCurrentUser(persistedUser)
             _registrationState.value = true
         }
     }
@@ -87,9 +107,10 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
 
     fun login(email: String, password: String): Boolean {
         val normalizedEmail = normalizeEmail(email)
-        val accounts = loadAccountsIndex()
-        val userId = accounts[normalizedEmail] ?: return false
-        val storedUser = readUser(userId) ?: return false
+        val storedUser = runCatching { runBlocking { userRepository.getUserByEmail(normalizedEmail) } }
+            .getOrNull()
+            ?.toDomain()
+            ?: return false
 
         return if (storedUser.password == password) {
             _authError.value = null
@@ -103,15 +124,12 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     fun logout() {
         _isLoggedIn.value = false
         _userState.value = null
-        authPrefs.edit()
-            .putBoolean(KEY_IS_LOGGED_IN, false)
-            .remove(KEY_CURRENT_USER_ID)
-            .apply()
+        authSessionStore.clearSession()
     }
 
-    private fun loadUser() {
-        val currentUserId = authPrefs.getString(KEY_CURRENT_USER_ID, null) ?: return
-        val user = readUser(currentUserId) ?: return
+    private suspend fun loadUser() {
+        val currentUserId = authSessionStore.currentUserIdOrNull() ?: return
+        val user = userRepository.getUserById(currentUserId)?.toDomain() ?: return
         _userState.value = user
     }
 
@@ -119,12 +137,13 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val current = _userState.value ?: return@launch
             val trimmedUser = user.copy(email = user.email.trim())
-            val accounts = loadAccountsIndex()
+            val accounts = authSessionStore.loadAccountsIndex()
 
             val oldEmailKey = normalizeEmail(current.email)
             val newEmailKey = normalizeEmail(trimmedUser.email)
+            val existingUser = userRepository.getUserByEmail(newEmailKey)
 
-            if (oldEmailKey != newEmailKey && accounts.containsKey(newEmailKey)) {
+            if (oldEmailKey != newEmailKey && existingUser != null && existingUser.id != current.id) {
                 _authError.value = "Пользователь с таким email уже существует"
                 return@launch
             }
@@ -132,11 +151,16 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
             if (oldEmailKey != newEmailKey) {
                 accounts.remove(oldEmailKey)
                 accounts[newEmailKey] = current.id
-                saveAccountsIndex(accounts)
+                authSessionStore.saveAccountsIndex(accounts)
             }
 
             writeUser(trimmedUser)
-            _userState.value = trimmedUser
+            if (trimmedUser.weight > 0f && current.weight != trimmedUser.weight) {
+                weightSyncRepository.saveWeightMeasurement(trimmedUser.id, trimmedUser.weight)
+            } else {
+                weightSyncRepository.harmonizeCurrentWeight(trimmedUser.id)
+            }
+            _userState.value = userRepository.getUserById(trimmedUser.id)?.toDomain() ?: trimmedUser
             _authError.value = null
         }
     }
@@ -144,93 +168,27 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     private fun setCurrentUser(user: User) {
         _isLoggedIn.value = true
         _userState.value = user
-        authPrefs.edit()
-            .putBoolean(KEY_IS_LOGGED_IN, true)
-            .putString(KEY_CURRENT_USER_ID, user.id)
-            .apply()
+        authSessionStore.setCurrentUser(user.id)
     }
 
-    private fun readUser(userId: String): User? {
-        val prefs = profilePrefs(userId)
-        val email = prefs.getString("email", null) ?: return null
-        return User(
-            id = userId,
-            email = email,
-            password = prefs.getString("password", "")!!,
-            firstName = prefs.getString("firstName", "")!!,
-            lastName = prefs.getString("lastName", "")!!,
-            age = prefs.getInt("age", 0),
-            gender = prefs.getString("gender", "")!!,
-            avatarUri = prefs.getString("avatarUri", null),
-            height = prefs.getFloat("height", 0f),
-            weight = prefs.getFloat("weight", 0f),
-            shoulders = prefs.getFloat("shoulders", 0f),
-            waist = prefs.getFloat("waist", 0f),
-            hips = prefs.getFloat("hips", 0f),
-            chest = prefs.getFloat("chest", 0f),
-            measurementDate = prefs.getString("measurementDate", "")!!,
-            goalName = prefs.getString("goalName", "")!!,
-            goalDeadline = prefs.getString("goalDeadline", "")!!
-        )
+    private suspend fun writeUser(user: User) {
+        userRepository.upsertUser(user.toEntity())
     }
-
-    private fun writeUser(user: User) {
-        val prefs = profilePrefs(user.id)
-        with(prefs.edit()) {
-            putString("email", user.email)
-            putString("password", user.password)
-            putString("firstName", user.firstName)
-            putString("lastName", user.lastName)
-            putInt("age", user.age)
-            putString("gender", user.gender)
-            putString("avatarUri", user.avatarUri)
-            putFloat("height", user.height)
-            putFloat("weight", user.weight)
-            putFloat("shoulders", user.shoulders)
-            putFloat("waist", user.waist)
-            putFloat("hips", user.hips)
-            putFloat("chest", user.chest)
-            putString("measurementDate", user.measurementDate)
-            putString("goalName", user.goalName)
-            putString("goalDeadline", user.goalDeadline)
-            apply()
-        }
-    }
-
-    private fun profilePrefs(userId: String) =
-        appContext.getSharedPreferences("user_profile_" + userId, Context.MODE_PRIVATE)
 
     private fun normalizeEmail(email: String) = email.trim().lowercase(Locale.getDefault())
 
-    private fun loadAccountsIndex(): MutableMap<String, String> {
-        val stored = authPrefs.getStringSet(KEY_ACCOUNTS, emptySet()) ?: emptySet()
-        val map = mutableMapOf<String, String>()
-        for (entry in stored) {
-            val parts = entry.split('|')
-            if (parts.size == 2) {
-                map[parts[0]] = parts[1]
-            }
-        }
-        return map
-    }
-
-    private fun saveAccountsIndex(map: Map<String, String>) {
-        val serialized = map.map { "${it.key}|${it.value}" }.toSet()
-        authPrefs.edit().putStringSet(KEY_ACCOUNTS, serialized).apply()
-    }
-
     private fun maybeMigrateLegacyUser() {
-        if (authPrefs.getBoolean(KEY_LEGACY_MIGRATED, false)) return
+        if (authSessionStore.isLegacyMigrated()) return
 
         val legacyPrefs = appContext.getSharedPreferences(LEGACY_USER_PREFS, Context.MODE_PRIVATE)
         val legacyEmail = legacyPrefs.getString("email", null)
 
         if (legacyEmail != null) {
-            val accounts = loadAccountsIndex()
+            val accounts = authSessionStore.loadAccountsIndex()
             val normalizedEmail = normalizeEmail(legacyEmail)
             val existingId = accounts[normalizedEmail]
             val userId = existingId
-                ?: authPrefs.getString(KEY_CURRENT_USER_ID, null)
+                ?: authSessionStore.currentUserIdOrNull()
                 ?: UUID.randomUUID().toString()
 
             val migratedUser = User(
@@ -254,20 +212,20 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
             )
 
             accounts[normalizedEmail] = userId
-            saveAccountsIndex(accounts)
-            writeUser(migratedUser)
+            authSessionStore.saveAccountsIndex(accounts)
+            viewModelScope.launch { writeUser(migratedUser) }
 
-            migrateSharedPrefs("training_prefs", "training_prefs_${userId}")
-            migrateSharedPrefs("article_prefs", "article_prefs_${userId}")
-            migrateSharedPrefs("nutrition_prefs", "nutrition_prefs_${userId}")
-            migrateSharedPrefs("analytics_prefs", "analytics_prefs_${userId}")
+            migrateSharedPrefs("training_prefs", "training_prefs_$userId")
+            migrateSharedPrefs("article_prefs", "article_prefs_$userId")
+            migrateSharedPrefs("nutrition_prefs", "nutrition_prefs_$userId")
+            migrateSharedPrefs("analytics_prefs", "analytics_prefs_$userId")
 
             if (_isLoggedIn.value) {
                 setCurrentUser(migratedUser)
             }
         }
 
-        authPrefs.edit().putBoolean(KEY_LEGACY_MIGRATED, true).apply()
+        authSessionStore.markLegacyMigrated()
     }
 
     private fun migrateSharedPrefs(legacyName: String, newName: String) {
@@ -295,11 +253,52 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     companion object {
-        const val AUTH_PREFS_NAME = "auth_prefs"
-        const val KEY_IS_LOGGED_IN = "is_logged_in"
-        const val KEY_CURRENT_USER_ID = "current_user_id"
-        private const val KEY_ACCOUNTS = "accounts"
-        private const val KEY_LEGACY_MIGRATED = "legacy_migrated"
-        private const val LEGACY_USER_PREFS = "user_prefs"
+        const val AUTH_PREFS_NAME = AuthSessionStore.PREFS_NAME
+        const val KEY_CURRENT_USER_ID = AuthSessionStore.KEY_CURRENT_USER_ID
+        const val KEY_IS_LOGGED_IN = AuthSessionStore.KEY_IS_LOGGED_IN
+        const val KEY_ACCOUNTS = AuthSessionStore.KEY_ACCOUNTS
+        const val KEY_LEGACY_MIGRATED = AuthSessionStore.KEY_LEGACY_MIGRATED
+        const val LEGACY_USER_PREFS = "user_prefs"
     }
 }
+
+private fun UserEntity.toDomain() = User(
+    id = id,
+    email = email,
+    password = password,
+    firstName = firstName,
+    lastName = lastName,
+    age = age,
+    gender = gender,
+    avatarUri = avatarUri,
+    height = height,
+    weight = weight,
+    shoulders = shoulders,
+    waist = waist,
+    hips = hips,
+    chest = chest,
+    measurementDate = measurementDate,
+    goalName = goalName,
+    goalDeadline = goalDeadline
+)
+
+private fun User.toEntity() = UserEntity(
+    id = id,
+    name = listOf(firstName, lastName).joinToString(" ").trim(),
+    email = email.trim(),
+    password = password,
+    firstName = firstName,
+    lastName = lastName,
+    age = age,
+    gender = gender,
+    avatarUri = avatarUri,
+    height = height,
+    weight = weight,
+    shoulders = shoulders,
+    waist = waist,
+    hips = hips,
+    chest = chest,
+    measurementDate = measurementDate,
+    goalName = goalName,
+    goalDeadline = goalDeadline
+)

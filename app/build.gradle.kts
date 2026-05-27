@@ -1,6 +1,5 @@
 import java.util.Properties
 
-
 val localProperties = Properties().apply {
     val localPropertiesFile = rootProject.file("local.properties")
     if (localPropertiesFile.exists()) {
@@ -14,25 +13,13 @@ fun localProperty(name: String, default: String = ""): String =
 fun String.escapedForBuildConfig(): String =
     replace("\\", "\\\\").replace("\"", "\\\"")
 
-// чтение из local.properties (через helper localProperty), затем из project properties, затем из env
-val fatSecretConsumerKey: String? =
-    localProperty("FATSECRET_CONSUMER_KEY").takeIf { it.isNotBlank() }
-        ?: (project.findProperty("FATSECRET_CONSUMER_KEY") as? String)?.takeIf { it.isNotBlank() }
-        ?: System.getenv("FATSECRET_CONSUMER_KEY")
-
-val fatSecretConsumerSecret: String? =
-    localProperty("FATSECRET_CONSUMER_SECRET").takeIf { it.isNotBlank() }
-        ?: (project.findProperty("FATSECRET_CONSUMER_SECRET") as? String)?.takeIf { it.isNotBlank() }
-        ?: System.getenv("FATSECRET_CONSUMER_SECRET")
-
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.hilt.android)
     kotlin("kapt")
 }
-
-
 
 android {
     namespace = "com.example.workouttracker"
@@ -47,14 +34,6 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        buildConfigField("String", "FATSECRET_CLIENT_ID", "\"${localProperty("FATSECRET_CLIENT_ID").escapedForBuildConfig()}\"")
-        buildConfigField("String", "FATSECRET_CLIENT_SECRET", "\"${localProperty("FATSECRET_CLIENT_SECRET").escapedForBuildConfig()}\"")
-        fatSecretConsumerKey?.let {
-            buildConfigField("String", "FATSECRET_CONSUMER_KEY", "\"${it.escapedForBuildConfig()}\"")
-        }
-        fatSecretConsumerSecret?.let {
-            buildConfigField("String", "FATSECRET_CONSUMER_SECRET", "\"${it.escapedForBuildConfig()}\"")
-        }
         buildConfigField("String", "LLM_API_KEY", "\"${localProperty("LLM_API_KEY").escapedForBuildConfig()}\"")
         buildConfigField("String", "LLM_BASE_URL", "\"${localProperty("LLM_BASE_URL", "https://openrouter.ai/api/v1").escapedForBuildConfig()}\"")
         buildConfigField("String", "LLM_MODEL_ID", "\"${localProperty("LLM_MODEL_ID", "openai/gpt-4o-mini").escapedForBuildConfig()}\"")
@@ -88,25 +67,65 @@ android {
     }
 }
 
-dependencies {
+kapt {
+    correctErrorTypes = true
+}
 
+dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
-    implementation(platform(libs.androidx.compose.bom))
+    implementation(platform("androidx.compose:compose-bom:2025.05.01"))
     implementation(libs.androidx.ui)
-        implementation(libs.androidx.ui.graphics)
+    implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
     implementation(libs.androidx.compose.ui.text)
     implementation(libs.androidx.compose.foundation)
+    implementation(libs.androidx.compose.foundation.layout)
     implementation(libs.firebase.crashlytics.buildtools)
     implementation(libs.androidx.navigation.runtime.ktx)
     implementation(libs.androidx.compose.animation.core)
-    implementation(libs.androidx.compose.ui)
-    implementation(libs.androidx.compose.foundation.layout)
-    implementation(libs.androidx.foundation)
-    implementation(libs.androidx.ui.text)
+    implementation("androidx.navigation:navigation-compose:2.9.0")
+    implementation("androidx.compose.material3:material3-window-size-class:1.2.1")
+    implementation("androidx.compose.material:material-icons-core:1.4.3")
+    implementation("androidx.compose.material:material-icons-extended:1.4.3")
+    implementation("androidx.compose.runtime:runtime-saveable")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.0")
+
+    implementation(libs.hilt.android)
+    kapt(libs.hilt.compiler)
+    implementation(libs.androidx.hilt.navigation.compose)
+
+    implementation("androidx.room:room-runtime:2.7.0")
+    implementation("androidx.room:room-ktx:2.7.0")
+    kapt("androidx.room:room-compiler:2.7.0")
+    implementation("androidx.datastore:datastore-preferences:1.1.1")
+    implementation("androidx.work:work-runtime-ktx:2.10.0")
+
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
+    implementation("com.squareup.retrofit2:retrofit:2.9.0")
+    implementation("com.squareup.retrofit2:converter-gson:2.9.0")
+    implementation("com.google.code.gson:gson:2.8.9")
+
+    implementation("io.coil-kt:coil-compose:2.2.2")
+    implementation("io.coil-kt:coil-gif:2.2.2")
+
+    implementation("com.google.android.gms:play-services-fitness:21.1.0")
+    implementation("com.google.android.gms:play-services-location:21.0.1")
+    implementation("com.google.android.gms:play-services-auth:21.2.0")
+    implementation("androidx.health.connect:connect-client:1.2.0-alpha02")
+    implementation("androidx.localbroadcastmanager:localbroadcastmanager:1.1.0")
+    implementation("com.google.mlkit:barcode-scanning:17.3.0")
+    implementation("com.github.PhilJay:MPAndroidChart:v3.1.0")
+
+    implementation("androidx.camera:camera-core:1.4.1")
+    implementation("androidx.camera:camera-camera2:1.4.1")
+    implementation("androidx.camera:camera-lifecycle:1.4.1")
+    implementation("androidx.camera:camera-view:1.4.1")
+    implementation("com.google.guava:guava:33.3.1-android")
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -114,70 +133,4 @@ dependencies {
     androidTestImplementation(libs.androidx.ui.test.junit4)
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
-
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
-
-
-    // Compose BOM
-    implementation(platform("androidx.compose:compose-bom:2025.05.01"))
-
-    // UI Toolkit
-    implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.ui:ui-tooling-preview")
-
-    // Material 3
-    implementation("androidx.compose.material3:material3:1.3.2")
-
-    implementation("androidx.compose.material3:material3-window-size-class:1.2.1")
-
-    // Material 3 Icons
-    implementation("androidx.compose.material:material-icons-core:1.4.3")
-    implementation("androidx.compose.material:material-icons-extended:1.4.3")
-
-    // Navigation for Compose
-    implementation("androidx.navigation:navigation-compose:2.9.0")
-
-    // Coil для загрузки изображений
-    implementation("io.coil-kt:coil-compose:2.2.2")
-
-    // Google Fit
-    implementation("com.google.android.gms:play-services-fitness:21.1.0")
-    implementation("com.google.android.gms:play-services-location:21.0.1")
-    // Погода
-    implementation("com.squareup.retrofit2:retrofit:2.9.0")
-    implementation("com.squareup.retrofit2:converter-gson:2.9.0")
-    implementation("com.google.code.gson:gson:2.8.9")
-    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
-    // Графики
-    implementation("com.github.PhilJay:MPAndroidChart:v3.1.0")
-
-    // (можно опционально оставить для отладки)
-    debugImplementation("androidx.compose.ui:ui-tooling")
-    debugImplementation("androidx.compose.ui:ui-test-manifest")
-
-    implementation("androidx.compose.runtime:runtime-saveable")
-
-    implementation("com.google.android.gms:play-services-fitness:21.1.0")
-    implementation("com.google.android.gms:play-services-auth:21.2.0")
-
-    implementation("androidx.localbroadcastmanager:localbroadcastmanager:1.1.0")
-    implementation("androidx.health.connect:connect-client:1.2.0-alpha02")
-
-    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.0")
-
-    implementation("androidx.room:room-runtime:2.7.0")
-    implementation("androidx.room:room-ktx:2.7.0")
-    kapt("androidx.room:room-compiler:2.7.0")
-    implementation("androidx.datastore:datastore-preferences:1.1.1")
-    implementation("androidx.work:work-runtime-ktx:2.10.0")
-    implementation("com.google.mlkit:barcode-scanning:17.3.0")
-
-    // CameraX
-    implementation("androidx.camera:camera-core:1.4.1")
-    implementation("androidx.camera:camera-camera2:1.4.1")
-    implementation("androidx.camera:camera-lifecycle:1.4.1")
-    implementation("androidx.camera:camera-view:1.4.1")
-    implementation("com.google.guava:guava:33.3.1-android")
-
 }

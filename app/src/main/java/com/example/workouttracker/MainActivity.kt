@@ -1,63 +1,67 @@
 package com.example.workouttracker
 
-import android.content.Context
 import android.os.Bundle
-import androidx.lifecycle.lifecycleScope
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.runtime.*
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.compose.rememberNavController
+import androidx.lifecycle.lifecycleScope
+import com.example.workouttracker.data.exercise.ExerciseSeedLoader
+import com.example.workouttracker.data.local.LegacyDataMigrator
+import com.example.workouttracker.data.settings.AppSettings
 import com.example.workouttracker.data.settings.AppSettingsDataStore
 import com.example.workouttracker.ui.navigation.WorkoutNavGraph
 import com.example.workouttracker.ui.theme.ThemeVariant
 import com.example.workouttracker.ui.theme.WorkoutTrackerTheme
 import com.example.workouttracker.workers.StepServiceWatchdogWorker
+import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 
+@AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+
+    @Inject lateinit var legacyDataMigrator: LegacyDataMigrator
+    @Inject lateinit var exerciseSeedLoader: ExerciseSeedLoader
+    @Inject lateinit var appSettingsDataStore: AppSettingsDataStore
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         StepServiceWatchdogWorker.schedule(this)
+        lifecycleScope.launch {
+            legacyDataMigrator.migrateAllKnownUsers()
+            exerciseSeedLoader.ensureLoaded()
+        }
         setContent {
-            val context = LocalContext.current
-
-            // SharedPreferences для настроек
-            val prefs = remember {
-                context.getSharedPreferences("settings", Context.MODE_PRIVATE)
-            }
-            val settingsStore = remember { AppSettingsDataStore(context) }
-
-            // Текущее состояние темы — читаем из preferences
-            var themeVariant by remember {
-                mutableStateOf(
-                    runCatching {
-                        val saved = prefs.getString("theme_variant", ThemeVariant.DARK.name)
-                        ThemeVariant.valueOf(saved ?: ThemeVariant.DARK.name)
-                    }.getOrDefault(ThemeVariant.DARK)
+            val settings by appSettingsDataStore.settingsFlow.collectAsState(
+                initial = AppSettings(
+                    themeVariant = ThemeVariant.DARK.name,
+                    notificationsEnabled = true,
+                    stepGoal = 8000,
+                    exercisesLoaded = false,
+                    exercisesCatalogVersion = 0
                 )
-            }
+            )
+            val themeVariant = runCatching {
+                ThemeVariant.valueOf(settings.themeVariant)
+            }.getOrDefault(ThemeVariant.DARK)
 
-            // Колбэк переключения темы по кругу (7 вариантов)
             val toggleTheme: () -> Unit = {
                 val next = when (themeVariant) {
-                    ThemeVariant.DARK        -> ThemeVariant.LIGHT
-                    ThemeVariant.LIGHT       -> ThemeVariant.BROWN
-                    ThemeVariant.BROWN       -> ThemeVariant.FUCHSIA
-                    ThemeVariant.FUCHSIA     -> ThemeVariant.GREEN
-                    ThemeVariant.GREEN       -> ThemeVariant.BLUE_PURPLE
+                    ThemeVariant.DARK -> ThemeVariant.LIGHT
+                    ThemeVariant.LIGHT -> ThemeVariant.BROWN
+                    ThemeVariant.BROWN -> ThemeVariant.FUCHSIA
+                    ThemeVariant.FUCHSIA -> ThemeVariant.GREEN
+                    ThemeVariant.GREEN -> ThemeVariant.BLUE_PURPLE
                     ThemeVariant.BLUE_PURPLE -> ThemeVariant.AURORA
-                    ThemeVariant.AURORA      -> ThemeVariant.DARK
+                    ThemeVariant.AURORA -> ThemeVariant.DARK
                 }
-                themeVariant = next
-                // сохраняем выбор
-                prefs.edit().putString("theme_variant", next.name).apply()
-                lifecycleScope.launch { settingsStore.setThemeVariant(next.name) }
+                lifecycleScope.launch { appSettingsDataStore.setThemeVariant(next.name) }
             }
 
             WorkoutTrackerTheme(variant = themeVariant) {
@@ -66,10 +70,9 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     val navController = rememberNavController()
-
                     WorkoutNavGraph(
                         navController = navController,
-                        currentTheme = themeVariant,   // ← ВАЖНО: пробрасываем вниз
+                        currentTheme = themeVariant,
                         onToggleTheme = toggleTheme
                     )
                 }

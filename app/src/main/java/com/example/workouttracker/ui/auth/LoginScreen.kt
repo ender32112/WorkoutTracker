@@ -77,7 +77,7 @@ fun LoginScreen(
                 ) {
                     Text("С возвращением", style = MaterialTheme.typography.headlineMedium)
                     Text(
-                        text = "Войдите в аккаунт, чтобы продолжить тренировки.",
+                        text = "Войдите в аккаунт, чтобы продолжить работу в приложении.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

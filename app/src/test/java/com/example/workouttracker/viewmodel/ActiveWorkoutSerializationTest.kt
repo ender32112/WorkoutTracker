@@ -1,9 +1,9 @@
 package com.example.workouttracker.viewmodel
 
 import com.example.workouttracker.data.local.ActiveWorkoutStateEntity
-import com.example.workouttracker.ui.training.ActiveWorkoutUiState
-import com.example.workouttracker.ui.training.ExerciseSetInput
-import com.example.workouttracker.ui.training.WorkoutExerciseInput
+import com.example.workouttracker.feature.training.presentation.ActiveWorkoutUiState
+import com.example.workouttracker.feature.training.presentation.ExerciseSetInput
+import com.example.workouttracker.feature.training.presentation.WorkoutExerciseInput
 import com.google.gson.Gson
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -18,12 +18,14 @@ class ActiveWorkoutSerializationTest {
             startedAt = 1710000000000,
             exercises = listOf(
                 WorkoutExerciseInput(
-                    exerciseId = 1,
+                    instanceId = "instance-1",
+                    exerciseId = "squat",
                     exerciseName = "Squat",
                     sets = listOf(ExerciseSetInput(weight = "100", reps = "5"), ExerciseSetInput(weight = "105", reps = "3"))
                 ),
                 WorkoutExerciseInput(
-                    exerciseId = 2,
+                    instanceId = "instance-2",
+                    exerciseId = "bench-press",
                     exerciseName = "Bench Press",
                     sets = listOf(ExerciseSetInput(weight = "80", reps = "8"))
                 )

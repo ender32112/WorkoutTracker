@@ -8,9 +8,53 @@ import androidx.room.PrimaryKey
 @Entity(tableName = "users")
 data class UserEntity(
     @PrimaryKey val id: String,
-    val name: String,
-    val email: String,
-    val createdAt: Long = System.currentTimeMillis()
+    val name: String = "",
+    val email: String = "",
+    val password: String = "",
+    val firstName: String = "",
+    val lastName: String = "",
+    val age: Int = 0,
+    val gender: String = "",
+    val avatarUri: String? = null,
+    val height: Float = 0f,
+    val weight: Float = 0f,
+    val shoulders: Float = 0f,
+    val waist: Float = 0f,
+    val hips: Float = 0f,
+    val chest: Float = 0f,
+    val measurementDate: String = "",
+    val goalName: String = "",
+    val goalDeadline: String = "",
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
+@Entity(
+    tableName = "nutrition_profiles",
+    foreignKeys = [ForeignKey(
+        entity = UserEntity::class,
+        parentColumns = ["id"],
+        childColumns = ["userId"],
+        onDelete = ForeignKey.CASCADE
+    )],
+    indices = [Index("userId")]
+)
+data class NutritionProfileEntity(
+    @PrimaryKey val userId: String,
+    val sex: String? = null,
+    val age: Int? = null,
+    val heightCm: Int? = null,
+    val weightKg: Float? = null,
+    val goal: String? = null,
+    val favoriteIngredientsJson: String = "[]",
+    val dislikedIngredientsJson: String = "[]",
+    val allergiesJson: String = "[]",
+    val dietSettingsJson: String? = null,
+    val customCalories: Int? = null,
+    val customProtein: Int? = null,
+    val customFats: Int? = null,
+    val customCarbs: Int? = null,
+    val updatedAt: Long = System.currentTimeMillis()
 )
 
 @Entity(
@@ -55,12 +99,13 @@ data class StepEntryEntity(
         childColumns = ["userId"],
         onDelete = ForeignKey.CASCADE
     )],
-    indices = [Index("userId"), Index("isBase"), Index("isFavorite")]
+    indices = [Index("userId"), Index("isBase"), Index("isFavorite"), Index("sourceExerciseId")]
 )
 data class ExerciseEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val userId: String,
     val name: String,
+    val sourceExerciseId: String? = null,
     val aliases: String? = null,
     val muscles: String,
     val equipment: String? = null,
@@ -96,20 +141,14 @@ data class WorkoutTemplateEntity(
             parentColumns = ["id"],
             childColumns = ["templateId"],
             onDelete = ForeignKey.CASCADE
-        ),
-        ForeignKey(
-            entity = ExerciseEntity::class,
-            parentColumns = ["id"],
-            childColumns = ["exerciseId"],
-            onDelete = ForeignKey.CASCADE
         )
     ],
-    indices = [Index("templateId"), Index("exerciseId")]
+    indices = [Index("templateId"), Index("catalogExerciseId")]
 )
 data class WorkoutTemplateExerciseEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val templateId: Long,
-    val exerciseId: Long,
+    val catalogExerciseId: String,
     val orderInTemplate: Int,
     val defaultSets: Int = 3,
     val defaultReps: Int = 10,
@@ -142,12 +181,12 @@ data class WorkoutSessionPerformedEntity(
         childColumns = ["sessionId"],
         onDelete = ForeignKey.CASCADE
     )],
-    indices = [Index("sessionId"), Index("exerciseId")]
+    indices = [Index("sessionId"), Index("catalogExerciseId")]
 )
 data class WorkoutPerformedExerciseEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val sessionId: Long,
-    val exerciseId: Long,
+    val catalogExerciseId: String,
     val exerciseNameSnapshot: String
 )
 
@@ -240,4 +279,40 @@ data class ProductCacheEntity(
     val carbs100: Float,
     val source: String,
     val cachedAt: Long = System.currentTimeMillis()
+)
+
+@Entity(
+    tableName = "meal_plans",
+    primaryKeys = ["userId", "dateIso"],
+    foreignKeys = [ForeignKey(
+        entity = UserEntity::class,
+        parentColumns = ["id"],
+        childColumns = ["userId"],
+        onDelete = ForeignKey.CASCADE
+    )],
+    indices = [Index("userId"), Index("dateIso")]
+)
+data class MealPlanEntity(
+    val userId: String,
+    val dateIso: String,
+    val payloadJson: String,
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
+@Entity(
+    tableName = "article_purchases",
+    foreignKeys = [ForeignKey(
+        entity = UserEntity::class,
+        parentColumns = ["id"],
+        childColumns = ["userId"],
+        onDelete = ForeignKey.CASCADE
+    )],
+    indices = [Index("userId"), Index(value = ["userId", "articleId"], unique = true)]
+)
+data class ArticlePurchaseEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val userId: String,
+    val articleId: String,
+    val cost: Int,
+    val purchasedAt: Long = System.currentTimeMillis()
 )

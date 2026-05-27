@@ -92,7 +92,7 @@ fun RegistrationScreen(
                 ) {
                     Text("Регистрация", style = MaterialTheme.typography.headlineMedium)
                     Text(
-                        text = "Заполните профиль для персональных рекомендаций тренировок.",
+                        text = "Заполните профиль для лучшей адаптации под пользователя.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="12dp"
+    android:background="@android:color/transparent">
+
+    <!-- Верхняя строка: иконка + заголовок -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+
+        <TextView
+            android:id="@+id/tvTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:text="🚶 Шаги сегодня"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- Текущие шаги и цель -->
+    <TextView
+        android:id="@+id/tvSteps"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="0 из 8000 шагов"
+        android:textSize="15sp"
+        android:textStyle="bold"
+        android:paddingTop="4dp" />
+
+    <!-- Мотивационный текст -->
+    <TextView
+        android:id="@+id/tvMotivation"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Вперёд к цели! 💪"
+        android:textSize="13sp"
+        android:paddingTop="2dp" />
+
+    <!-- Толстый кастомный прогресс-бар -->
+    <ProgressBar
+        android:id="@+id/progressSteps"
+        style="@android:style/Widget.ProgressBar.Horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="10dp"
+        android:layout_marginTop="8dp"
+        android:max="100"
+        android:indeterminate="false"
+        android:progressDrawable="@drawable/progress_steps" />
+</LinearLayout>

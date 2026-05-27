@@ -8,18 +8,46 @@ import androidx.room.Query
 import androidx.room.Relation
 import androidx.room.Transaction
 import androidx.room.Update
+import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface WorkoutTrackerDao {
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsertUser(user: UserEntity)
+
+    @Query("SELECT * FROM users WHERE id = :userId LIMIT 1")
+    suspend fun getUserById(userId: String): UserEntity?
+
+    @Query("SELECT * FROM users WHERE id = :userId LIMIT 1")
+    fun observeUser(userId: String): Flow<UserEntity?>
+
+    @Query("SELECT * FROM users WHERE lower(email) = lower(:email) LIMIT 1")
+    suspend fun getUserByEmail(email: String): UserEntity?
+
+    @Query("SELECT * FROM users ORDER BY createdAt ASC")
+    suspend fun getAllUsers(): List<UserEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertWeightEntry(entry: WeightEntryEntity)
 
+    @Query("DELETE FROM weight_entries WHERE userId = :userId")
+    suspend fun deleteWeightEntries(userId: String)
+
+    @Query("DELETE FROM weight_entries WHERE userId = :userId AND loggedAt >= :startMillis AND loggedAt < :endMillis")
+    suspend fun deleteWeightEntriesInRange(userId: String, startMillis: Long, endMillis: Long)
+
+    @Query("SELECT * FROM weight_entries WHERE userId = :userId ORDER BY loggedAt DESC, id DESC")
+    suspend fun getWeightEntriesOnce(userId: String): List<WeightEntryEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertStepEntry(entry: StepEntryEntity)
+
+    @Query("DELETE FROM step_entries WHERE userId = :userId")
+    suspend fun deleteStepEntries(userId: String)
+
+    @Query("DELETE FROM step_entries WHERE userId = :userId AND dateIso = :dateIso")
+    suspend fun deleteStepEntryByDate(userId: String, dateIso: String)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertExercise(entry: ExerciseEntity): Long
@@ -29,6 +57,12 @@ interface WorkoutTrackerDao {
 
     @Query("SELECT * FROM exercise_catalog WHERE userId = :userId ORDER BY isBase DESC, name ASC")
     fun observeExercises(userId: String): Flow<List<ExerciseEntity>>
+
+    @Query("SELECT * FROM exercise_catalog WHERE userId = :userId ORDER BY isBase DESC, name ASC")
+    suspend fun getExercisesOnce(userId: String): List<ExerciseEntity>
+
+    @Query("SELECT * FROM exercise_catalog WHERE userId = :userId AND sourceExerciseId = :sourceExerciseId LIMIT 1")
+    suspend fun getExerciseBySourceId(userId: String, sourceExerciseId: String): ExerciseEntity?
 
     @Query("SELECT COUNT(*) FROM exercise_catalog WHERE userId = :userId AND isBase = 1")
     suspend fun countBaseExercises(userId: String): Int
@@ -69,16 +103,22 @@ interface WorkoutTrackerDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertWorkoutTemplateExercise(entry: WorkoutTemplateExerciseEntity)
 
-    @Query("DELETE FROM workout_template_exercise WHERE id = :entryId")
-    suspend fun deleteWorkoutTemplateExercise(entryId: Long)
+    @Query(
+        """
+        DELETE FROM workout_template_exercise
+        WHERE id = :entryId
+          AND templateId IN (SELECT id FROM workout_templates WHERE userId = :userId)
+        """
+    )
+    suspend fun deleteWorkoutTemplateExercise(userId: String, entryId: Long)
 
     @Transaction
     @Query("SELECT * FROM workout_templates WHERE userId = :userId ORDER BY title ASC")
     fun observeWorkoutTemplatesWithExercises(userId: String): Flow<List<WorkoutTemplateWithExercises>>
 
     @Transaction
-    @Query("SELECT * FROM workout_templates WHERE id = :templateId")
-    suspend fun getWorkoutTemplateWithExercises(templateId: Long): WorkoutTemplateWithExercises?
+    @Query("SELECT * FROM workout_templates WHERE id = :templateId AND userId = :userId")
+    suspend fun getWorkoutTemplateWithExercises(userId: String, templateId: Long): WorkoutTemplateWithExercises?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertWorkoutSession(entry: WorkoutSessionPerformedEntity): Long
@@ -97,19 +137,41 @@ interface WorkoutTrackerDao {
     fun observePerformedSessionsWithExercises(userId: String): Flow<List<PerformedSessionWithExercises>>
 
     @Transaction
-    @Query("SELECT * FROM workout_session_performed WHERE id = :sessionId")
-    fun observePerformedSessionDetail(sessionId: Long): Flow<PerformedSessionWithExercises?>
+    @Query("SELECT * FROM workout_session_performed WHERE id = :sessionId AND userId = :userId")
+    fun observePerformedSessionDetail(userId: String, sessionId: Long): Flow<PerformedSessionWithExercises?>
 
     @Query(
         """
-        SELECT wspe.exerciseNameSnapshot AS exerciseName,
+        DELETE FROM workout_session_performed
+        WHERE id = :sessionId
+          AND userId = :userId
+        """
+    )
+    suspend fun deleteWorkoutSession(userId: String, sessionId: Long)
+
+    @Query(
+        """
+        DELETE FROM workout_performed_exercise
+        WHERE sessionId = :sessionId
+          AND sessionId IN (
+            SELECT id FROM workout_session_performed
+            WHERE userId = :userId
+          )
+        """
+    )
+    suspend fun deletePerformedExercisesForSession(userId: String, sessionId: Long)
+
+    @Query(
+        """
+        SELECT wspe.catalogExerciseId AS exerciseId,
+               MAX(wspe.exerciseNameSnapshot) AS exerciseName,
                MAX(wsp.weight * wsp.reps) AS bestVolumeSet,
                MAX(wsp.weight * (1 + wsp.reps / 30.0)) AS bestE1rm
         FROM workout_set_performed wsp
         INNER JOIN workout_performed_exercise wspe ON wspe.id = wsp.performedExerciseId
         INNER JOIN workout_session_performed wspf ON wspf.id = wspe.sessionId
         WHERE wspf.userId = :userId
-        GROUP BY wspe.exerciseNameSnapshot
+        GROUP BY wspe.catalogExerciseId
         ORDER BY exerciseName
         """
     )
@@ -139,8 +201,11 @@ interface WorkoutTrackerDao {
     @Query("DELETE FROM active_workout_state WHERE userId = :userId")
     suspend fun clearActiveWorkoutState(userId: String)
 
-    @Query("SELECT * FROM weight_entries WHERE userId = :userId ORDER BY loggedAt DESC")
+    @Query("SELECT * FROM weight_entries WHERE userId = :userId ORDER BY loggedAt DESC, id DESC")
     fun observeWeight(userId: String): Flow<List<WeightEntryEntity>>
+
+    @Query("SELECT * FROM weight_entries WHERE userId = :userId ORDER BY loggedAt DESC, id DESC LIMIT 1")
+    suspend fun getLatestWeightEntry(userId: String): WeightEntryEntity?
 
     @Query("SELECT * FROM step_entries WHERE userId = :userId ORDER BY dateIso DESC")
     fun observeStepEntries(userId: String): Flow<List<StepEntryEntity>>
@@ -150,6 +215,9 @@ interface WorkoutTrackerDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertNutritionEntry(entry: NutritionEntryEntity)
+
+    @Query("SELECT * FROM nutrition_entries WHERE userId = :userId ORDER BY dateIso DESC, createdAt DESC")
+    suspend fun getNutritionEntriesOnce(userId: String): List<NutritionEntryEntity>
 
     @Query("DELETE FROM nutrition_entries WHERE id = :entryId AND userId = :userId")
     suspend fun deleteNutritionEntry(userId: String, entryId: String)
@@ -169,8 +237,57 @@ interface WorkoutTrackerDao {
     @Query("SELECT * FROM product_cache WHERE barcode = :barcode LIMIT 1")
     suspend fun getCachedProductByBarcode(barcode: String): ProductCacheEntity?
 
+    @Query("SELECT * FROM product_cache ORDER BY cachedAt DESC")
+    suspend fun getCachedProducts(): List<ProductCacheEntity>
+
+    @Query(
+        """
+        SELECT * FROM product_cache
+        WHERE lower(name) LIKE '%' || lower(:query) || '%'
+           OR barcode LIKE '%' || :query || '%'
+        ORDER BY cachedAt DESC
+        """
+    )
+    suspend fun searchCachedProducts(query: String): List<ProductCacheEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertCachedProduct(item: ProductCacheEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertNutritionProfile(entry: NutritionProfileEntity)
+
+    @Query("SELECT * FROM nutrition_profiles WHERE userId = :userId LIMIT 1")
+    suspend fun getNutritionProfile(userId: String): NutritionProfileEntity?
+
+    @Query("SELECT * FROM nutrition_profiles WHERE userId = :userId LIMIT 1")
+    fun observeNutritionProfile(userId: String): Flow<NutritionProfileEntity?>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertMealPlan(entry: MealPlanEntity)
+
+    @Query("SELECT * FROM meal_plans WHERE userId = :userId AND dateIso = :dateIso LIMIT 1")
+    suspend fun getMealPlan(userId: String, dateIso: String): MealPlanEntity?
+
+    @Query("DELETE FROM meal_plans WHERE userId = :userId AND dateIso = :dateIso")
+    suspend fun deleteMealPlan(userId: String, dateIso: String)
+
+    @Query("SELECT * FROM meal_plans WHERE userId = :userId ORDER BY dateIso DESC")
+    suspend fun getMealPlans(userId: String): List<MealPlanEntity>
+
+    @Query("SELECT * FROM meal_plans WHERE userId = :userId AND dateIso = :dateIso LIMIT 1")
+    fun observeMealPlan(userId: String, dateIso: String): Flow<MealPlanEntity?>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertArticlePurchase(entry: ArticlePurchaseEntity)
+
+    @Query("SELECT * FROM article_purchases WHERE userId = :userId ORDER BY purchasedAt DESC")
+    fun observeArticlePurchases(userId: String): Flow<List<ArticlePurchaseEntity>>
+
+    @Query("SELECT * FROM article_purchases WHERE userId = :userId")
+    suspend fun getArticlePurchasesOnce(userId: String): List<ArticlePurchaseEntity>
+
+    @Query("SELECT COALESCE(SUM(cost), 0) FROM article_purchases WHERE userId = :userId")
+    fun observeArticleSpentPoints(userId: String): Flow<Int>
 
     @Transaction
     suspend fun persistWorkoutPerformed(
@@ -190,7 +307,7 @@ interface WorkoutTrackerDao {
             val perfExerciseId = insertWorkoutPerformedExercise(
                 WorkoutPerformedExerciseEntity(
                     sessionId = sessionId,
-                    exerciseId = ex.exerciseId,
+                    catalogExerciseId = ex.exerciseId,
                     exerciseNameSnapshot = ex.exerciseName
                 )
             )
@@ -204,9 +321,36 @@ interface WorkoutTrackerDao {
                     )
                 )
             }
-            markExerciseUsed(userId, ex.exerciseId, finishedAt)
         }
         clearActiveWorkoutState(userId)
+    }
+
+    @Transaction
+    suspend fun replacePerformedSessionExercises(
+        userId: String,
+        sessionId: Long,
+        exercises: List<PerformedExerciseDraft>
+    ) {
+        deletePerformedExercisesForSession(userId, sessionId)
+        exercises.forEach { ex ->
+            val perfExerciseId = insertWorkoutPerformedExercise(
+                WorkoutPerformedExerciseEntity(
+                    sessionId = sessionId,
+                    catalogExerciseId = ex.exerciseId,
+                    exerciseNameSnapshot = ex.exerciseName
+                )
+            )
+            ex.sets.forEachIndexed { index, set ->
+                insertWorkoutSet(
+                    WorkoutSetPerformedEntity(
+                        performedExerciseId = perfExerciseId,
+                        setOrder = index,
+                        weight = set.weight,
+                        reps = set.reps
+                    )
+                )
+            }
+        }
     }
 }
 
@@ -226,12 +370,6 @@ data class PerformedSessionWithExercises(
     val exercises: List<WorkoutPerformedExerciseWithSets>
 )
 
-data class TemplateExerciseWithDetails(
-    @Embedded val templateExercise: WorkoutTemplateExerciseEntity,
-    @Relation(parentColumn = "exerciseId", entityColumn = "id")
-    val exercise: ExerciseEntity
-)
-
 data class WorkoutTemplateWithExercises(
     @Embedded val template: WorkoutTemplateEntity,
     @Relation(
@@ -239,10 +377,11 @@ data class WorkoutTemplateWithExercises(
         entityColumn = "templateId",
         entity = WorkoutTemplateExerciseEntity::class
     )
-    val exercises: List<TemplateExerciseWithDetails>
+    val exercises: List<WorkoutTemplateExerciseEntity>
 )
 
 data class ExercisePrRow(
+    val exerciseId: String,
     val exerciseName: String,
     val bestVolumeSet: Double,
     val bestE1rm: Double
@@ -259,7 +398,7 @@ data class PerformedSetDraft(
 )
 
 data class PerformedExerciseDraft(
-    val exerciseId: Long,
+    val exerciseId: String,
     val exerciseName: String,
     val sets: List<PerformedSetDraft>
 )

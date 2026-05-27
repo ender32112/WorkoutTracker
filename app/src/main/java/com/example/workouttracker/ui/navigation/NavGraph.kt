@@ -3,7 +3,7 @@ package com.example.workouttracker.ui.navigation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -18,7 +18,7 @@ fun WorkoutNavGraph(
     currentTheme: ThemeVariant,          // ← НОВЫЙ параметр
     onToggleTheme: () -> Unit = {}       // уже был
 ) {
-    val authViewModel: AuthViewModel = viewModel()
+    val authViewModel: AuthViewModel = hiltViewModel()
     val isLoggedIn by authViewModel.isLoggedIn.collectAsState()
 
     NavHost(

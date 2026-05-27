@@ -2,33 +2,26 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Разрешения для шагомера и сервиса -->
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <!-- Для Android 14+/34+: специализированный тип foreground-сервиса -->
     <uses-permission
         android:name="android.permission.FOREGROUND_SERVICE_HEALTH"
         tools:targetApi="34" />
-
-    <!-- Нужен BootReceiver'у -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.CAMERA" />
-
-    <!-- Health Connect -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.health.READ_STEPS" />
-    <uses-permission android:name="android.permission.health.WRITE_WEIGHT" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+
     <queries>
         <package android:name="com.google.android.apps.healthdata" />
     </queries>
 
-    <!-- Локация (можно оставить одну пару, у тебя дубли) -->
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-
     <application
+        android:name=".WorkoutTrackerApp"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -50,20 +43,36 @@
             </intent-filter>
         </activity>
 
-        <!-- 👇 Foreground-сервис подсчёта шагов -->
+        <activity
+            android:name=".health.HealthConnectRationaleActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
+            </intent-filter>
+        </activity>
+
+        <activity-alias
+            android:name=".health.HealthConnectPermissionUsageActivity"
+            android:exported="true"
+            android:permission="android.permission.START_VIEW_PERMISSION_USAGE"
+            android:targetActivity=".health.HealthConnectRationaleActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
+                <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
+            </intent-filter>
+        </activity-alias>
+
         <service
-            android:name=".ui.analytics.StepCounterService"
+            android:name=".feature.analytics.runtime.StepCounterService"
             android:exported="false"
             android:foregroundServiceType="health" />
 
-        <!-- 👇 Ресивер сброса в полночь -->
         <receiver
-            android:name=".ui.analytics.MidnightResetReceiver"
+            android:name=".feature.analytics.runtime.MidnightResetReceiver"
             android:exported="false" />
 
-        <!-- 👇 Ресивер автозапуска после перезагрузки -->
         <receiver
-            android:name=".ui.analytics.BootReceiver"
+            android:name=".feature.analytics.runtime.BootReceiver"
             android:enabled="true"
             android:exported="true">
             <intent-filter>

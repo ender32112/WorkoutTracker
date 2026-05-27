@@ -1,7 +1,10 @@
 package com.example.workouttracker.ui.navigation
 
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.FitnessCenter
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.RestaurantMenu
 import androidx.compose.ui.graphics.vector.ImageVector
 
 sealed class BottomNavItem(
@@ -12,7 +15,5 @@ sealed class BottomNavItem(
     data object Training : BottomNavItem("training", Icons.Default.FitnessCenter, "Тренировки")
     data object Nutrition : BottomNavItem("nutrition", Icons.Default.RestaurantMenu, "Питание")
     data object Analytics : BottomNavItem("analytics", Icons.Default.BarChart, "Аналитика")
-    data object Articles : BottomNavItem("articles", Icons.Default.Article, "Статьи")
-    data object Achieve : BottomNavItem("achievements", Icons.Default.Star, "Достижения")
     data object Profile : BottomNavItem("profile", Icons.Default.Person, "Профиль")
 }

@@ -1,17 +1,20 @@
 package com.example.workouttracker.llm
 
 import android.content.Context
-import com.example.workouttracker.ui.nutrition.MealPlan
-import com.example.workouttracker.ui.nutrition.MealType
-import com.example.workouttracker.ui.nutrition.NutritionProfile
-import com.example.workouttracker.ui.nutrition.Norm
-import com.example.workouttracker.ui.nutrition.PlannedFoodItem
-import com.example.workouttracker.ui.nutrition.PlannedMeal
-import com.example.workouttracker.ui.nutrition.Goal
-import com.example.workouttracker.ui.nutrition.FridgeProduct
-import com.example.workouttracker.viewmodel.NutritionViewModel
+import com.example.workouttracker.feature.nutrition.presentation.FridgeProduct
+import com.example.workouttracker.feature.nutrition.presentation.Goal
+import com.example.workouttracker.feature.nutrition.presentation.MealPlan
+import com.example.workouttracker.feature.nutrition.presentation.MealType
+import com.example.workouttracker.feature.nutrition.presentation.Norm
+import com.example.workouttracker.feature.nutrition.presentation.NutritionProfile
+import com.example.workouttracker.feature.nutrition.presentation.PlannedFoodItem
+import com.example.workouttracker.feature.nutrition.presentation.PlannedMeal
+import com.example.workouttracker.feature.nutrition.presentation.QuantityUnit
 import com.google.gson.Gson
+import com.google.gson.JsonElement
 import com.google.gson.JsonObject
+import com.google.gson.JsonParser
+import com.google.gson.stream.JsonReader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -19,10 +22,8 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.logging.HttpLoggingInterceptor
-import kotlin.math.roundToInt
+import java.io.StringReader
 import java.util.Locale
-
-// ---------- DTO для OpenAI-совместимого API ----------
 
 data class ChatMessage(
     val role: String,
@@ -33,7 +34,7 @@ data class ChatCompletionRequest(
     val model: String,
     val messages: List<ChatMessage>,
     val response_format: ResponseFormat? = ResponseFormat("json_object"),
-    val temperature: Double = 0.4
+    val temperature: Double = 0.35
 )
 
 data class ResponseFormat(
@@ -53,16 +54,10 @@ data class ChatMessageContent(
     val content: String
 )
 
-/**
- * Репозиторий, который общается с LLM через HTTP и
- * возвращает MealPlan для ViewModel.
- */
 class NutritionAiRepository private constructor(context: Context, private val userId: String) {
 
     private val gson = Gson()
-    private val prefs = context.applicationContext.getSharedPreferences("nutrition_cache_${'$'}userId", Context.MODE_PRIVATE)
-
-    // ---------- OkHttp клиент ----------
+    private val prefs = context.applicationContext.getSharedPreferences("nutrition_cache_$userId", Context.MODE_PRIVATE)
 
     private val client: OkHttpClient by lazy {
         val logging = HttpLoggingInterceptor().apply {
@@ -75,28 +70,31 @@ class NutritionAiRepository private constructor(context: Context, private val us
                 val newRequest = chain.request().newBuilder()
                     .header("Authorization", "Bearer ${LlmConfig.API_KEY}")
                     .header("Content-Type", "application/json")
-                    // рекомендовано OpenRouter: идентификатор приложения и сайта
-                    .header("HTTP-Referer", "https://your-app-or-github.com") // можешь указать свой сайт или GitHub
-                    .header("X-Title", "WorkoutTracker Nutrition AI")         // имя приложения
+                    .header("HTTP-Referer", LlmConfig.HTTP_REFERER)
+                    .header("X-Title", LlmConfig.APP_TITLE)
                     .build()
                 chain.proceed(newRequest)
             }
             .build()
     }
 
-
     private val mediaTypeJson = "application/json; charset=utf-8".toMediaType()
 
     fun loadCachedPlan(date: String): MealPlan? {
-        val key = "meal_plan_" + date
+        val key = "meal_plan_$date"
         val json = prefs.getString(key, null) ?: return null
-        return gson.fromJson(json, MealPlan::class.java)
+        val plan = gson.fromJson(json, MealPlan::class.java)
+        return if (containsLatinResult(plan.meals)) {
+            prefs.edit().remove(key).apply()
+            null
+        } else {
+            plan
+        }
     }
 
     fun saveCachedPlan(date: String, plan: MealPlan) {
-        val key = "meal_plan_" + date
-        val json = gson.toJson(plan)
-        prefs.edit().putString(key, json).apply()
+        pruneCachedPlans(setOf(date))
+        prefs.edit().putString("meal_plan_$date", gson.toJson(plan)).apply()
     }
 
     fun copyPlanToDate(fromDate: String, toDate: String) {
@@ -105,256 +103,49 @@ class NutritionAiRepository private constructor(context: Context, private val us
     }
 
     fun clearCachedPlan(date: String) {
-        val key = "meal_plan_" + date
-        prefs.edit().remove(key).apply()
+        prefs.edit().remove("meal_plan_$date").apply()
     }
 
-    // ---------- Публичный метод ----------
+    fun pruneCachedPlans(keepDates: Set<String>) {
+        val keepKeys = keepDates.mapTo(mutableSetOf()) { "meal_plan_$it" }
+        val keysToRemove = prefs.all.keys.filter { key ->
+            key.startsWith("meal_plan_") && key !in keepKeys
+        }
+        if (keysToRemove.isNotEmpty()) {
+            val editor = prefs.edit()
+            keysToRemove.forEach(editor::remove)
+            editor.apply()
+        }
+    }
 
     suspend fun generatePersonalizedPlan(
         date: String,
         profile: NutritionProfile?,
         recommendedNorm: Norm?,
-        userNorm: Map<String, Int>?,
-        history: List<NutritionViewModel.DailyNutritionSummary>,
-        dislikedByBehavior: Set<String>
+        userNorm: Map<String, Int>?
     ): MealPlan = withContext(Dispatchers.IO) {
-
-        val defaultNorm = mapOf(
-            "calories" to 2000,
-            "protein" to 120,
-            "fats" to 70,
-            "carbs" to 250
+        val targets = resolveTargets(recommendedNorm, userNorm)
+        val systemPrompt = buildPersonalizedSystemPrompt()
+        val userPrompt = buildPersonalizedUserPrompt(
+            date = date,
+            profile = profile,
+            recommendedNorm = recommendedNorm,
+            userNorm = userNorm,
+            targets = targets
         )
 
-        val targetCaloriesBase = userNorm?.get("calories")
-            ?: recommendedNorm?.calories
-            ?: defaultNorm.getValue("calories")
-
-        val targetProteinBase = userNorm?.get("protein")
-            ?: recommendedNorm?.protein
-            ?: defaultNorm.getValue("protein")
-
-        val targetFatsBase = userNorm?.get("fats")
-            ?: recommendedNorm?.fats
-            ?: defaultNorm.getValue("fats")
-
-        val targetCarbsBase = userNorm?.get("carbs")
-            ?: recommendedNorm?.carbs
-            ?: defaultNorm.getValue("carbs")
-
-        val historyWindow = history.take(7)
-        val avgCalories = historyWindow.takeIf { it.isNotEmpty() }?.map { it.calories }?.average()
-        val calorieDiff = avgCalories?.minus(targetCaloriesBase)
-        val calorieAdjustment = calorieDiff?.let { (-it).coerceIn(-400.0, 400.0) } ?: 0.0
-        val adjustedCaloriesDouble = (targetCaloriesBase + calorieAdjustment).coerceAtLeast(1500.0)
-        val adjustedCalories = adjustedCaloriesDouble.roundToInt()
-
-// коэффициент, во сколько раз изменилась калорийность
-        val scale = adjustedCaloriesDouble / targetCaloriesBase.toDouble()
-
-// масштабируем макросы пропорционально
-        val adjustedProtein = (targetProteinBase * scale).roundToInt().coerceAtLeast(0)
-        val adjustedFats    = (targetFatsBase * scale).roundToInt().coerceAtLeast(0)
-        val adjustedCarbs   = (targetCarbsBase * scale).roundToInt().coerceAtLeast(0)
-
-        val profileDescription = profile?.let {
-            "Пол: ${if (it.sex.name == "MALE") "мужчина" else "женщина"}, " +
-                "${it.age} лет, рост ${it.heightCm} см, вес ${it.weightKg} кг, цель — ${goalToText(it.goal)}.\n" +
-                "Любимые продукты: ${it.favoriteIngredients.joinToString().ifEmpty { "не указаны" }}.\n" +
-                "Нелюбимые продукты: ${it.dislikedIngredients.joinToString().ifEmpty { "нет" }}.\n" +
-                "Аллергии: ${it.allergies.joinToString().ifEmpty { "нет" }}."
-        } ?: "Профиль пользователя неизвестен (пол, возраст, рост, вес, цель не указаны)."
-
-        val recommendedNormText = recommendedNorm?.let {
-            "Рекомендуемая норма: ${it.calories} ккал, белки ${it.protein} г, жиры ${it.fats} г, углеводы ${it.carbs} г."
-        } ?: "Рекомендуемая норма неизвестна."
-
-        val userNormText = userNorm?.let {
-            "Пользовательская норма: ${it["calories"] ?: "?"} ккал, белки ${it["protein"] ?: "?"} г, жиры ${it["fats"] ?: "?"} г, углеводы ${it["carbs"] ?: "?"} г."
-        } ?: "Пользовательская норма не задана."
-
-        val effectiveNormText =
-            "Эффективная цель с учётом истории: $adjustedCalories ккал, белки $adjustedProtein г, жиры $adjustedFats г, углеводы $adjustedCarbs г."
-
-
-        val behaviorDislikedText = if (dislikedByBehavior.isNotEmpty()) {
-            "Список блюд, которые пользователь часто заменяет или избегает (считай, что они ему не нравятся): " +
-                dislikedByBehavior.joinToString()
-        } else {
-            "Нет явных нелюбимых блюд по поведению."
-        }
-
-
-        val historyDetails = if (historyWindow.isNotEmpty()) {
-            historyWindow.joinToString(separator = "\n") { h ->
-                "- ${h.date}: ${h.calories} ккал (Б:${h.protein}, Ж:${h.fats}, У:${h.carbs})"
-            }
-        } else {
-            "История питания за последние дни отсутствует."
-        }
-
-        val historySummary = calorieDiff?.let {
-            when {
-                it > 50 -> "За последние ${historyWindow.size} дней пользователь в среднем переедал примерно на ${it.roundToInt()} ккал. Сделай план сегодня примерно на ${calorieAdjustment.roundToInt().let { adj -> if (adj < 0) -adj else 0 }} ккал ниже базовой цели, но не опускайся ниже 1500 ккал."
-                it < -50 -> "За последние ${historyWindow.size} дней пользователь в среднем недоедал примерно на ${(-it).roundToInt()} ккал. Добавь немного калорий к плану, но оставайся в разумных пределах здоровья."
-                else -> "Последние дни близки к целевой норме, придерживайся базовой цели."
-            }
-        } ?: "История отсутствует, используй базовую цель."
-
-        val systemPrompt = """
-            Ты диетолог и нутриционист. Тебе нужно составить персонализированный план питания на день.
-            Ты ДОЛЖЕН ответить строго в формате JSON, без Markdown и без дополнительного текста.
-            Формат ответа:
-            {
-              "meals": [
-                {
-                  "mealType": "BREAKFAST" | "LUNCH" | "DINNER" | "SNACK" | "OTHER",
-                  "items": [
-                    {
-                      "name": "Овсянка с ягодами",
-                      "grams": 250,
-                      "calories": 350,
-                      "protein": 15,
-                      "fats": 10,
-                      "carbs": 50
-                    }
-                  ]
-                }
-              ]
-            }
-
-            Обязательные требования:
-            - Верни только JSON без пояснений.
-            - Суммарные калории и макроэлементы по всем блюдам должны быть близки к целевой норме.
-            - Используй несколько приёмов пищи (завтрак, обед, ужин, перекусы), в каждом 1–3 блюда.
-            - Никогда не предлагай блюда, содержащие указанные аллергены.
-            - По возможности избегай нелюбимых продуктов.
-            - Никогда не предлагай блюда из списка dislikedByBehavior (то, что пользователь часто заменяет).
-        """.trimIndent()
-
-        val userPrompt = """
-            Дата: $date
-
-            Профиль:
-            $profileDescription
-
-            Целевые нормы:
-            $recommendedNormText
-            $userNormText
-            $effectiveNormText
-
-            $behaviorDislikedText
-
-            Учитывай, что эти блюда пользователю не нравятся, не предлагай их в плане.
-
-            Считай именно эту эффективную цель основной при составлении плана.
-
-            Старайся ориентироваться на пользовательскую норму, но учитывай рекомендации и цель (похудение/набор/поддержание).
-
-            История питания (последние ${historyWindow.size} дней):
-            $historyDetails
-            $historySummary
-
-            Задача: составь план питания на сегодняшний день, приблизься к целевой норме (калории и макросы), слегка скорректировав калорийность с учётом истории, без экстремальных ограничений.
-            Верни только JSON в указанном формате.
-        """.trimIndent()
-
-        val requestBody = ChatCompletionRequest(
-            model = LlmConfig.MODEL_ID,
-            messages = listOf(
-                ChatMessage(role = "system", content = systemPrompt),
-                ChatMessage(role = "user", content = userPrompt)
-            )
+        val meals = requestRussianResponse(
+            systemPrompt = systemPrompt,
+            userPrompt = userPrompt,
+            parse = ::parseMeals
         )
-
-        val jsonBody = gson.toJson(requestBody)
-        val body = jsonBody.toRequestBody(mediaTypeJson)
-
-        val url = LlmConfig.BASE_URL.trimEnd('/') + "/chat/completions"
-
-        val request = Request.Builder()
-            .url(url)
-            .post(body)
-            .build()
-
-        val responseText = client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                val errorText = response.body?.string()
-                throw IllegalStateException("Ошибка LLM API: ${response.code} ${response.message} $errorText")
-            }
-
-            response.body?.string()
-                ?: throw IllegalStateException("Пустой ответ от LLM API")
-        }
-
-        val chatResponse = gson.fromJson(responseText, ChatCompletionResponse::class.java)
-
-        val content = chatResponse.choices.firstOrNull()?.message?.content
-            ?: throw IllegalStateException("Пустой content в ответе модели")
-
-// content может быть либо уже JSON-объектом, либо строкой с JSON внутри
-        val rootElement = gson.fromJson(content, com.google.gson.JsonElement::class.java)
-
-        val json: JsonObject = when {
-            rootElement.isJsonObject -> rootElement.asJsonObject
-            rootElement.isJsonPrimitive && rootElement.asJsonPrimitive.isString -> {
-                // content = "\"{...}\"" → достаём строку и парсим ещё раз как объект
-                val inner = rootElement.asJsonPrimitive.asString
-                gson.fromJson(inner, JsonObject::class.java)
-            }
-            else -> {
-                throw IllegalStateException("Ожидался JSON-объект плана, но пришло: $rootElement")
-            }
-        }
-
-        val respCals = adjustedCalories
-        val respProt = adjustedProtein
-        val respFat  = adjustedFats
-        val respCarb = adjustedCarbs
-
-        val mealsJson = json.getAsJsonArray("meals")
-            ?: throw IllegalStateException("Не удалось найти массив meals в ответе модели")
-        val meals = mealsJson.map { mealElement ->
-            val mealObj = mealElement.asJsonObject
-            val typeStr = when {
-                mealObj.has("mealType") -> mealObj.get("mealType").asString
-                mealObj.has("type") -> mealObj.get("type").asString
-                else -> throw IllegalStateException("У приёма пищи отсутствует поле mealType/type")
-            }
-            val type = MealType.valueOf(typeStr.uppercase(Locale.ROOT))
-
-            val itemsJson = mealObj.getAsJsonArray("items")
-                ?: throw IllegalStateException("У приёма пищи нет массива items")
-            val items = itemsJson.map { itemElement ->
-                val it = itemElement.asJsonObject
-                PlannedFoodItem(
-                    name = it.get("name")?.asString
-                        ?: throw IllegalStateException("У блюда нет имени"),
-                    grams = it.get("grams")?.asInt ?: 0,
-                    calories = it.get("calories")?.asInt
-                        ?: throw IllegalStateException("У блюда нет калорийности"),
-                    protein = it.get("protein")?.asInt
-                        ?: throw IllegalStateException("У блюда нет белков"),
-                    fat = it.get("fat")?.asInt ?: it.get("fats")?.asInt
-                        ?: throw IllegalStateException("У блюда нет жиров"),
-                    carbs = it.get("carbs")?.asInt
-                        ?: throw IllegalStateException("У блюда нет углеводов")
-                )
-            }
-
-            PlannedMeal(
-                type = type,
-                items = items
-            )
-        }
 
         MealPlan(
             date = date,
-            targetCalories = respCals,
-            targetProtein = respProt,
-            targetFat = respFat,
-            targetCarbs = respCarb,
+            targetCalories = targets.calories,
+            targetProtein = targets.protein,
+            targetFat = targets.fats,
+            targetCarbs = targets.carbs,
             meals = meals
         )
     }
@@ -365,65 +156,278 @@ class NutritionAiRepository private constructor(context: Context, private val us
         profile: NutritionProfile?,
         recommendedNorm: Norm?,
         userNorm: Map<String, Int>?,
-        history: List<NutritionViewModel.DailyNutritionSummary>,
-        dislikedByBehavior: Set<String>,
         allowExtraProducts: Boolean,
         goalCalories: Int,
         goalProtein: Int,
         goalFats: Int,
         goalCarbs: Int
     ): MealPlan = withContext(Dispatchers.IO) {
+        val systemPrompt = buildFridgeSystemPrompt()
+        val userPrompt = buildFridgeUserPrompt(
+            date = date,
+            fridge = fridge,
+            profile = profile,
+            recommendedNorm = recommendedNorm,
+            userNorm = userNorm,
+            allowExtraProducts = allowExtraProducts,
+            targets = PlanTargets(
+                calories = goalCalories,
+                protein = goalProtein,
+                fats = goalFats,
+                carbs = goalCarbs
+            )
+        )
 
-        val profileDescription = profile?.let {
-            "Пол: ${if (it.sex.name == "MALE") "мужчина" else "женщина"}, " +
-                    "${it.age} лет, рост ${it.heightCm} см, вес ${it.weightKg} кг, цель — ${goalToText(it.goal)}.\n" +
-                    "Любимые продукты: ${it.favoriteIngredients.joinToString().ifEmpty { "не указаны" }}.\n" +
-                    "Нелюбимые продукты: ${it.dislikedIngredients.joinToString().ifEmpty { "нет" }}.\n" +
-                    "Аллергии: ${it.allergies.joinToString().ifEmpty { "нет" }}."
-        } ?: "Профиль пользователя неизвестен (пол, возраст, рост, вес, цель не указаны)."
+        val meals = requestRussianResponse(
+            systemPrompt = systemPrompt,
+            userPrompt = userPrompt,
+            parse = ::parseMeals
+        )
 
-        val recommendedNormText = recommendedNorm?.let {
-            "Рекомендуемая норма: ${it.calories} ккал, белки ${it.protein} г, жиры ${it.fats} г, углеводы ${it.carbs} г."
-        } ?: "Рекомендуемая норма неизвестна."
+        MealPlan(
+            date = date,
+            targetCalories = goalCalories,
+            targetProtein = goalProtein,
+            targetFat = goalFats,
+            targetCarbs = goalCarbs,
+            meals = meals
+        )
+    }
 
-        val userNormText = userNorm?.let {
-            "Пользовательская норма: ${it["calories"] ?: "?"} ккал, белки ${it["protein"] ?: "?"} г, жиры ${it["fats"] ?: "?"} г, углеводы ${it["carbs"] ?: "?"} г."
-        } ?: "Пользовательская норма не задана."
+    suspend fun replaceMeal(
+        date: String,
+        mealType: MealType,
+        currentPlan: MealPlan,
+        profile: NutritionProfile?,
+        recommendedNorm: Norm?,
+        userNorm: Map<String, Int>?,
+        comment: String?
+    ): PlannedMeal = withContext(Dispatchers.IO) {
+        val systemPrompt = buildReplaceMealSystemPrompt()
+        val userPrompt = buildReplaceMealUserPrompt(
+            date = date,
+            mealType = mealType,
+            currentPlan = currentPlan,
+            profile = profile,
+            recommendedNorm = recommendedNorm,
+            userNorm = userNorm,
+            comment = comment
+        )
 
-        val behaviorDislikedText =
-            if (dislikedByBehavior.isNotEmpty())
-                "Поведенческие нелюбимые продукты: ${dislikedByBehavior.joinToString()}"
-            else
-                "Нет явных нелюбимых по поведению."
+        requestRussianResponse(
+            systemPrompt = systemPrompt,
+            userPrompt = userPrompt,
+            parse = { root -> parseSingleMeal(root, mealType) }
+        )
+    }
 
-        val fridgeListText =
-            if (fridge.isNotEmpty()) {
-                fridge.joinToString(separator = "\n") { product ->
-                    val availableText = product.availableGrams?.let { "$it г" } ?: "не указано"
-                    "${product.name}: ${product.calories100}/${product.protein100}/${product.fats100}/${product.carbs100} на 100 г; доступно $availableText"
-                }
-            } else {
-                "Список продуктов пуст."
+    private suspend fun <T> requestRussianResponse(
+        systemPrompt: String,
+        userPrompt: String,
+        parse: (JsonObject) -> T
+    ): T {
+        val first = parse(requestJson(systemPrompt, userPrompt))
+        if (!containsLatinResult(first)) return first
+
+        val retry = parse(requestJson(buildStrictRussianPrompt(systemPrompt), buildStrictRetryPrompt(userPrompt)))
+        if (!containsLatinResult(retry)) return retry
+
+        throw IllegalStateException("Не удалось получить полностью русскоязычный ответ от модели. Повторите генерацию ещё раз.")
+    }
+
+    private suspend fun requestJson(systemPrompt: String, userPrompt: String): JsonObject {
+        val requestBody = ChatCompletionRequest(
+            model = LlmConfig.MODEL_ID,
+            messages = listOf(
+                ChatMessage(role = "system", content = systemPrompt),
+                ChatMessage(role = "user", content = userPrompt)
+            )
+        )
+
+        val responseText = client.newCall(
+            Request.Builder()
+                .url(LlmConfig.BASE_URL.trimEnd('/') + "/chat/completions")
+                .post(gson.toJson(requestBody).toRequestBody(mediaTypeJson))
+                .build()
+        ).execute().use { response ->
+            if (!response.isSuccessful) {
+                val errorText = response.body?.string().orEmpty()
+                throw IllegalStateException("Ошибка LLM API: ${response.code} ${response.message} $errorText")
             }
+            response.body?.string() ?: throw IllegalStateException("Пустой ответ от LLM API")
+        }
 
-        val historyWindow = history.take(7)
-        val historyDetails =
-            if (historyWindow.isNotEmpty()) {
-                historyWindow.joinToString(separator = "\n") { h ->
-                    "- ${h.date}: ${h.calories} ккал (Б:${h.protein}, Ж:${h.fats}, У:${h.carbs})"
-                }
-            } else {
-                "История питания за последние дни отсутствует."
+        val chatResponse = gson.fromJson(responseText, ChatCompletionResponse::class.java)
+        val contentResponse = chatResponse.choices.firstOrNull()?.message?.content
+            ?: throw IllegalStateException("Модель вернула пустой контент")
+
+        return parseJsonObject(contentResponse)
+    }
+
+    private fun parseJsonObject(content: String): JsonObject {
+        return parseJsonObjectCandidate(content)
+            ?: parseJsonObjectCandidate(extractJsonCandidate(content))
+            ?: throw IllegalStateException(
+                "Не удалось распознать корректный JSON в ответе модели. Получено: ${content.take(300)}"
+            )
+    }
+
+    private fun parseJsonObjectCandidate(content: String): JsonObject? {
+        val normalized = content.trim()
+        if (normalized.isBlank()) return null
+
+        return runCatching {
+            val reader = JsonReader(StringReader(normalized)).apply { isLenient = true }
+            val rootElement = JsonParser.parseReader(reader)
+            when {
+                rootElement.isJsonObject -> rootElement.asJsonObject
+                rootElement.isJsonPrimitive && rootElement.asJsonPrimitive.isString ->
+                    parseJsonObjectCandidate(rootElement.asJsonPrimitive.asString)
+                else -> null
             }
+        }.getOrNull()
+    }
 
-        // -----------------------------------------------------------------------
-        // 🔥 Новый строгий systemPrompt (исправляет всю логику с холодильником)
-        // -----------------------------------------------------------------------
-        val systemPrompt = """
-        Ты диетолог и нутриционист. Составь реалистичный план питания на день.
-        Ответ строго в формате JSON без Markdown и без пояснений.
+    private fun extractJsonCandidate(content: String): String {
+        var normalized = content.trim()
 
-        Формат:
+        if (normalized.startsWith("```")) {
+            normalized = normalized
+                .removePrefix("```json")
+                .removePrefix("```JSON")
+                .removePrefix("```")
+                .substringBeforeLast("```")
+                .trim()
+        }
+
+        val firstBrace = normalized.indexOf('{')
+        val lastBrace = normalized.lastIndexOf('}')
+        return if (firstBrace >= 0 && lastBrace > firstBrace) {
+            normalized.substring(firstBrace, lastBrace + 1)
+        } else {
+            normalized
+        }
+    }
+
+    private fun parseMeals(root: JsonObject): List<PlannedMeal> {
+        val mealsJson = root.getAsJsonArray("meals")
+            ?: throw IllegalStateException("В ответе модели отсутствует массив meals")
+
+        return mealsJson.map { mealElement ->
+            val mealObject = mealElement.asJsonObject
+            val mealTypeValue = when {
+                mealObject.has("mealType") -> mealObject.get("mealType").asString
+                mealObject.has("type") -> mealObject.get("type").asString
+                else -> throw IllegalStateException("У приёма пищи нет поля mealType/type")
+            }
+            val mealType = resolveMealType(mealTypeValue)
+
+            val itemsJson = mealObject.getAsJsonArray("items")
+                ?: throw IllegalStateException("У приёма пищи отсутствует массив items")
+
+            PlannedMeal(
+                type = mealType,
+                items = itemsJson.map { parseFoodItem(it.asJsonObject) }
+            )
+        }
+    }
+
+    private fun parseSingleMeal(root: JsonObject, fallbackType: MealType): PlannedMeal {
+        val mealTypeValue = when {
+            root.has("mealType") -> root.get("mealType").asString
+            root.has("type") -> root.get("type").asString
+            else -> fallbackType.name
+        }
+        val mealType = resolveMealType(mealTypeValue, fallbackType)
+
+        val itemsJson = root.getAsJsonArray("items")
+            ?: throw IllegalStateException("В ответе замены отсутствует массив items")
+
+        return PlannedMeal(
+            type = mealType,
+            items = itemsJson.map { parseFoodItem(it.asJsonObject) }
+        )
+    }
+
+    private fun parseFoodItem(itemObject: JsonObject): PlannedFoodItem {
+        val name = itemObject.string("name")
+            ?: throw IllegalStateException("В элементе плана отсутствует name")
+
+        return PlannedFoodItem(
+            name = name,
+            grams = itemObject.int("grams") ?: 0,
+            calories = itemObject.int("calories")
+                ?: throw IllegalStateException("В элементе плана отсутствует calories"),
+            protein = itemObject.int("protein")
+                ?: throw IllegalStateException("В элементе плана отсутствует protein"),
+            fat = itemObject.int("fat") ?: itemObject.int("fats")
+                ?: throw IllegalStateException("В элементе плана отсутствует fat/fats"),
+            carbs = itemObject.int("carbs")
+                ?: throw IllegalStateException("В элементе плана отсутствует carbs")
+        )
+    }
+
+    private fun resolveMealType(rawValue: String?, fallback: MealType = MealType.OTHER): MealType {
+        val normalized = rawValue
+            ?.trim()
+            ?.lowercase(Locale.ROOT)
+            ?.replace('ё', 'е')
+            ?: return fallback
+
+        return when (normalized) {
+            "breakfast", "завтрак", "утро", "morning" -> MealType.BREAKFAST
+            "lunch", "обед", "день", "afternoon" -> MealType.LUNCH
+            "dinner", "ужин", "вечер", "supper", "evening" -> MealType.DINNER
+            "snack", "перекус" -> MealType.SNACK
+            "other", "другое", "иной", "прочее" -> MealType.OTHER
+            else -> MealType.entries.firstOrNull {
+                it.name.equals(normalized, ignoreCase = true)
+            } ?: fallback
+        }
+    }
+
+    private fun buildPersonalizedSystemPrompt(): String = """
+        Ты нутрициолог и составляешь реалистичный план питания на один день.
+        Возвращай только валидный JSON без Markdown и пояснений.
+
+        Формат ответа:
+        {
+          "meals": [
+            {
+              "mealType": "BREAKFAST" | "LUNCH" | "DINNER" | "SNACK" | "OTHER",
+              "items": [
+                {
+                  "name": "Овсянка с ягодами",
+                  "grams": 250,
+                  "calories": 350,
+                  "protein": 15,
+                  "fats": 10,
+                  "carbs": 50
+                }
+              ]
+            }
+          ]
+        }
+
+        Правила:
+        - Все названия блюд и продуктов пиши только на русском языке.
+        - Не используй английские слова, если есть общеупотребимый русский вариант.
+        - Для каждого приёма пищи обязательно указывай mealType только из списка BREAKFAST, LUNCH, DINNER, SNACK. Значение OTHER используй только в крайнем случае.
+        - Держи калории в пределах +/-5% от цели, а белки, жиры и углеводы в пределах +/-10%.
+        - Проверяй арифметику: калории должны примерно соответствовать формуле 4*белки + 9*жиры + 4*углеводы с допуском +/-15%.
+        - Используй 3-5 реалистичных приёмов пищи в течение дня.
+        - Полностью исключай аллергены.
+        - По возможности избегай нелюбимых продуктов.
+        - Любимые продукты учитывай только как мягкое предпочтение: можно включать отдельные из них, но нельзя строить весь день только вокруг любимых продуктов и нельзя повторять один и тот же продукт в большинстве приёмов пищи.
+        - Делай сочетания продуктов естественными и бытовыми, без странных или однообразных комбинаций.
+        - Порции должны быть практичными: обычно от 80 до 450 граммов на продукт.
+    """.trimIndent()
+
+    private fun buildFridgeSystemPrompt(): String = """
+        Ты нутрициолог и составляешь реалистичный план питания на один день, максимально используя продукты из холодильника.
+        Возвращай только валидный JSON без Markdown и пояснений.
+
+        Формат ответа:
         {
           "meals": [
             {
@@ -442,364 +446,216 @@ class NutritionAiRepository private constructor(context: Context, private val us
           ]
         }
 
-        -----------------------------
-        Правила использования холодильника
-        -----------------------------
-
-        1. Продукты из холодильника ОБЯЗАТЕЛЬНО должны быть использованы хотя бы в некоторых блюдах (минимум 1 продукт).
-        2. Нельзя строить рацион исключительно из одного продукта. Если в холодильнике только один продукт — используй его ОДИН раз, в разумной порции (например, 30–100 г), а остальное добирай нормальными блюдами извне.
-        3. Нельзя превышать доступный вес продукта (available grams).
-        4. Продукт можно использовать только один раз как отдельный ингредиент, но его можно комбинировать с другими продуктами в составе блюда.
-        5. Если продуктов в холодильнике мало и цель КБЖУ недостижима только ими — обязательно добавляй блюда из других продуктов (если allowExtraProducts = true).
-        6. Если allowExtraProducts = false — используй только холодильник, но всё равно нельзя полностью строить меню из одного продукта. В этом случае делай 2–3 блюда-комбинации на основе имеющегося продукта, не превышая доступные граммы.
-        7. Не создавай меню, состоящее из одного ингредиента повторённого много раз.
-        
-        Дополнительное требование:
-        - Все блюда должны быть оформлены с указанием способа приготовления (например: "варёная гречка", "жареная курица", "запечённая рыба", "овощи на пару", "тушёная фасоль").
-        - Названия блюд должны быть реалистичными и отражать конкретный метод приготовления.
-        - Нельзя использовать сырой тип продукта, если для него стандартно применяется готовка (например, вместо "гречка" пиши "варёная гречка", вместо "курица" — "жареная курица" или "запечённая курица").
-
-        -----------------------------
-        Ограничения:
-        -----------------------------
-        - Соблюдай аллергены, нелюбимые продукты и dislikedByBehavior.
-        - Суммарные макросы должны быть максимально близки к дневной цели.
-        - Используй 3–5 приёмов пищи.
-        - Верни только корректный JSON.
+        Правила:
+        - Все названия блюд и продуктов пиши только на русском языке.
+        - Для каждого приёма пищи обязательно указывай mealType только из списка BREAKFAST, LUNCH, DINNER, SNACK. Значение OTHER используй только в крайнем случае.
+        - Обязательно используй продукты из холодильника хотя бы в части блюд.
+        - Никогда не превышай доступное количество продукта.
+        - Если количество указано в штуках, считай 1 штуку примерно как 100 г.
+        - Не строй весь день вокруг одного и того же продукта.
+        - Если allowExtraProducts = true, можно добавить дополнительные продукты, чтобы реалистично добрать цель.
+        - Если allowExtraProducts = false, используй только продукты из холодильника.
+        - Итоговые суточные значения должны быть близки к цели: калории +/-5%, БЖУ +/-10%.
+        - Проверяй арифметику калорий по макросам с допуском +/-15%.
+        - Любимые продукты учитывай только как мягкое предпочтение, а не как обязательную основу каждого приёма пищи.
+        - Делай блюда и сочетания продуктов естественными и правдоподобными.
     """.trimIndent()
 
-        // -----------------------------------------------------------------------
-        // 🔥 Новый userPrompt (более ясная постановка задачи)
-        // -----------------------------------------------------------------------
-        val userPrompt = """
+    private fun buildReplaceMealSystemPrompt(): String = """
+        Ты нутрициолог и заменяешь ровно один приём пищи в уже существующем плане.
+        Возвращай только валидный JSON без Markdown и пояснений.
+
+        Формат ответа:
+        {
+          "mealType": "BREAKFAST" | "LUNCH" | "DINNER" | "SNACK" | "OTHER",
+          "items": [
+            {
+              "name": "Название блюда",
+              "grams": 250,
+              "calories": 350,
+              "protein": 15,
+              "fat": 10,
+              "carbs": 50
+            }
+          ]
+        }
+
+        Правила:
+        - Все названия блюд и продуктов пиши только на русском языке.
+        - Сохраняй тот же тип приёма пищи.
+        - В поле mealType возвращай только одно из значений BREAKFAST, LUNCH, DINNER, SNACK. OTHER используй только в крайнем случае.
+        - Держись близко к заменяемому приёму по калориям и БЖУ с допуском +/-15%.
+        - Полностью исключай аллергены.
+        - По возможности избегай нелюбимых продуктов.
+        - Любимые продукты учитывай как пожелание, но не делай замену однообразной или странной по сочетанию продуктов.
+        - Замена должна быть практичной и правдоподобной.
+    """.trimIndent()
+
+    private fun buildStrictRussianPrompt(basePrompt: String): String = """
+        $basePrompt
+
+        Критично:
+        - Ответ должен быть полностью на русском языке.
+        - Запрещено использовать латиницу в названиях блюд и продуктов.
+        - Если сомневаешься, всё равно выбирай русский общеупотребимый вариант.
+    """.trimIndent()
+
+    private fun buildStrictRetryPrompt(basePrompt: String): String = """
+        $basePrompt
+
+        В прошлый раз модель использовала английские названия. Повтори ответ строго на русском языке.
+        Верни только JSON в той же схеме, без дополнительных комментариев.
+    """.trimIndent()
+
+    private fun buildPersonalizedUserPrompt(
+        date: String,
+        profile: NutritionProfile?,
+        recommendedNorm: Norm?,
+        userNorm: Map<String, Int>?,
+        targets: PlanTargets
+    ): String = """
         Дата: $date
 
-        Продукты в холодильнике:
-        $fridgeListText
-
-        Дневная цель:
-        Калории: $goalCalories
-        Белки: $goalProtein
-        Жиры: $goalFats
-        Углеводы: $goalCarbs
-
         Профиль:
-        $profileDescription
+        ${profileDescription(profile)}
 
-        Целевые нормы:
-        $recommendedNormText
-        $userNormText
+        Нормы:
+        ${recommendedNormText(recommendedNorm)}
+        ${userNormText(userNorm)}
+        Итоговая цель для этого плана: ${targets.calories} ккал, белки ${targets.protein} г, жиры ${targets.fats} г, углеводы ${targets.carbs} г.
 
-        Нелюбимые продукты:
-        ${profile?.dislikedIngredients?.joinToString().orEmpty().ifBlank { "нет" }}
-        $behaviorDislikedText
-
-        История питания:
-        $historyDetails
-
-        allowExtraProducts = $allowExtraProducts
-
-        Требуется:
-        - Составить 3–5 приёмов пищи.
-        - Использовать продукты из холодильника в блюдах, но не превышать доступный вес.
-        - Продукты из холодильника должны присутствовать в плане, но в умеренном количестве.
-          Не создавай рацион, построенный только на одном холодилльном продукте.
-          Если в холодильнике только один продукт, используй его один раз, а остальное добирай блюдами извне (если allowExtraProducts = true).
-        - Не повторять один и тот же ингредиент.
-        - Формировать блюда, комбинируя продукты, можно использовать один ингредиент отдельно.
-        - Пожалуйста, указывай способ приготовления в каждом блюде, чтобы блюда выглядели как реальные рецепты.
-        - Вернуть только JSON.
+        Составь практичный план питания на весь день для указанной даты.
+        Используй итоговую цель как основную.
+        Верни только JSON в указанной схеме.
     """.trimIndent()
 
+    private fun buildFridgeUserPrompt(
+        date: String,
+        fridge: List<FridgeProduct>,
+        profile: NutritionProfile?,
+        recommendedNorm: Norm?,
+        userNorm: Map<String, Int>?,
+        allowExtraProducts: Boolean,
+        targets: PlanTargets
+    ): String = """
+        Дата: $date
 
-        // -----------------------------
-        // Запрос к модели (не изменяем)
-        // -----------------------------
-        val requestBody = ChatCompletionRequest(
-            model = LlmConfig.MODEL_ID,
-            messages = listOf(
-                ChatMessage(role = "system", content = systemPrompt),
-                ChatMessage(role = "user", content = userPrompt)
-            )
-        )
+        Продукты из холодильника:
+        ${fridgeDescription(fridge)}
 
-        val jsonBody = gson.toJson(requestBody)
-        val body = jsonBody.toRequestBody(mediaTypeJson)
-        val url = LlmConfig.BASE_URL.trimEnd('/') + "/chat/completions"
+        Цель на день:
+        Калории: ${targets.calories}
+        Белки: ${targets.protein}
+        Жиры: ${targets.fats}
+        Углеводы: ${targets.carbs}
 
-        val request = Request.Builder().url(url).post(body).build()
-        val responseText = client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                val errorText = response.body?.string()
-                throw IllegalStateException("Ошибка LLM API: ${response.code} ${response.message} $errorText")
-            }
+        Профиль:
+        ${profileDescription(profile)}
 
-            response.body?.string()
-                ?: throw IllegalStateException("Пустой ответ от LLM API")
-        }
-        android.util.Log.e("LLM_RAW", responseText.take(2000))
+        Нормы:
+        ${recommendedNormText(recommendedNorm)}
+        ${userNormText(userNorm)}
 
-        val chatResponse = gson.fromJson(responseText, ChatCompletionResponse::class.java)
-        val content = chatResponse.choices.firstOrNull()?.message?.content
-            ?: throw IllegalStateException("Пустой content в ответе модели")
+        Разрешено добавлять продукты вне холодильника: ${if (allowExtraProducts) "да" else "нет"}.
+        Комментарий: избегай продуктов из списка «Нелюбимые», если это возможно.
 
-        val rootElement = gson.fromJson(content, com.google.gson.JsonElement::class.java)
+        Собери реалистичный план на 3-5 приёмов пищи.
+        Верни только JSON.
+    """.trimIndent()
 
-        val json: JsonObject = when {
-            rootElement.isJsonObject -> rootElement.asJsonObject
-            rootElement.isJsonPrimitive && rootElement.asJsonPrimitive.isString ->
-                gson.fromJson(rootElement.asJsonPrimitive.asString, JsonObject::class.java)
-            else -> throw IllegalStateException("Ожидался JSON-объект плана, но пришло: $rootElement")
-        }
-
-        val mealsJson = json.getAsJsonArray("meals")
-            ?: throw IllegalStateException("Не удалось найти массив meals")
-
-        val meals = mealsJson.map { mealElement ->
-            val mealObj = mealElement.asJsonObject
-            val typeStr =
-                if (mealObj.has("mealType")) mealObj.get("mealType").asString
-                else mealObj.get("type").asString
-
-            val type = MealType.valueOf(typeStr.uppercase(Locale.ROOT))
-
-            val itemsJson = mealObj.getAsJsonArray("items")
-                ?: throw IllegalStateException("У приёма пищи нет items")
-
-            val items = itemsJson.map { itemElement ->
-                val it = itemElement.asJsonObject
-                PlannedFoodItem(
-                    name = it.get("name")?.asString ?: "",
-                    grams = it.get("grams")?.asInt ?: 0,
-                    calories = it.get("calories")?.asInt ?: 0,
-                    protein = it.get("protein")?.asInt ?: 0,
-                    fat = it.get("fat")?.asInt ?: it.get("fats")?.asInt ?: 0,
-                    carbs = it.get("carbs")?.asInt ?: 0
-                )
-            }
-
-            PlannedMeal(type = type, items = items)
-        }
-
-        MealPlan(
-            date = date,
-            targetCalories = goalCalories,
-            targetProtein = goalProtein,
-            targetFat = goalFats,
-            targetCarbs = goalCarbs,
-            meals = meals
-        )
-    }
-
-
-    suspend fun canonicalizeFoodName(rawName: String): String = withContext(Dispatchers.IO) {
-        if (rawName.isBlank()) return@withContext ""
-
-        val systemPrompt = """
-            Ты нутриционист. Тебе нужно привести произвольное название продукта к короткому каноническому виду.
-            Верни только одно короткое слово или фразу без кавычек, без пробелов по краям, без пояснений и Markdown.
-            Примеры:
-            "куриная грудка" -> "курица"
-            "спагетти" -> "макароны"
-            "греческий йогурт" -> "йогурт"
-        """.trimIndent()
-
-        val userPrompt = "Приведи продукт к каноническому виду: $rawName"
-
-        val requestBody = ChatCompletionRequest(
-            model = LlmConfig.MODEL_ID,
-            messages = listOf(
-                ChatMessage(role = "system", content = systemPrompt),
-                ChatMessage(role = "user", content = userPrompt)
-            ),
-            response_format = null,
-            temperature = 0.1
-        )
-
-        val jsonBody = gson.toJson(requestBody)
-        val body = jsonBody.toRequestBody(mediaTypeJson)
-        val url = LlmConfig.BASE_URL.trimEnd('/') + "/chat/completions"
-
-        val request = Request.Builder()
-            .url(url)
-            .post(body)
-            .build()
-
-        val responseText = client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                val errorText = response.body?.string()
-                throw IllegalStateException("Ошибка LLM API: ${response.code} ${response.message} $errorText")
-            }
-
-            response.body?.string()
-                ?: throw IllegalStateException("Пустой ответ от LLM API")
-        }
-
-        val chatResponse = gson.fromJson(responseText, ChatCompletionResponse::class.java)
-
-        val content = chatResponse.choices.firstOrNull()?.message?.content
-            ?: throw IllegalStateException("Пустой content в ответе модели")
-
-        content.trim()
-    }
-
-    suspend fun replaceMeal(
+    private fun buildReplaceMealUserPrompt(
         date: String,
         mealType: MealType,
         currentPlan: MealPlan,
         profile: NutritionProfile?,
         recommendedNorm: Norm?,
         userNorm: Map<String, Int>?,
-        dislikedByBehavior: Set<String>,
         comment: String?
-    ): PlannedMeal = withContext(Dispatchers.IO) {
+    ): String = """
+        Дата: $date
 
-        val profileDescription = profile?.let {
-            "Пол: ${if (it.sex.name == "MALE") "мужчина" else "женщина"}, " +
-                "${it.age} лет, рост ${it.heightCm} см, вес ${it.weightKg} кг, цель — ${goalToText(it.goal)}.\n" +
-                "Любимые продукты: ${it.favoriteIngredients.joinToString().ifEmpty { "не указаны" }}.\n" +
-                "Нелюбимые продукты: ${it.dislikedIngredients.joinToString().ifEmpty { "нет" }}.\n" +
-                "Аллергии: ${it.allergies.joinToString().ifEmpty { "нет" }}."
-        } ?: "Профиль пользователя неизвестен (пол, возраст, рост, вес, цель не указаны)."
+        Нужно заменить приём пищи: ${mealType.name}
+        Комментарий пользователя: ${comment?.takeIf { it.isNotBlank() } ?: "без комментария"}
 
-        val recommendedNormText = recommendedNorm?.let {
-            "Рекомендуемая норма: ${it.calories} ккал, белки ${it.protein} г, жиры ${it.fats} г, углеводы ${it.carbs} г."
-        } ?: "Рекомендуемая норма неизвестна."
+        Профиль:
+        ${profileDescription(profile)}
 
-        val userNormText = userNorm?.let {
-            "Пользовательская норма: ${it["calories"] ?: "?"} ккал, белки ${it["protein"] ?: "?"} г, жиры ${it["fats"] ?: "?"} г, углеводы ${it["carbs"] ?: "?"} г."
-        } ?: "Пользовательская норма не задана."
+        Нормы:
+        ${recommendedNormText(recommendedNorm)}
+        ${userNormText(userNorm)}
 
-        val behaviorDislikedText = if (dislikedByBehavior.isNotEmpty()) {
-            "Список блюд, которые пользователь часто заменяет (поведенческие нелюбимые): " + dislikedByBehavior.joinToString()
+        Цель на день:
+        ${currentPlan.targetCalories} ккал, белки ${currentPlan.targetProtein} г, жиры ${currentPlan.targetFat} г, углеводы ${currentPlan.targetCarbs} г.
+
+        Текущий план за день JSON:
+        ${gson.toJson(currentPlan.meals)}
+
+        Замени только указанный приём пищи и верни только JSON.
+    """.trimIndent()
+
+    private fun profileDescription(profile: NutritionProfile?): String = profile?.let {
+        buildString {
+            append("Пол: ${if (it.sex.name == "MALE") "мужской" else "женский"}, ")
+            append("возраст ${it.age}, рост ${it.heightCm} см, вес ${it.weightKg} кг, цель ${goalToText(it.goal)}.\n")
+            append("Любимые продукты: ${it.favoriteIngredients.joinToString().ifEmpty { "не указаны" }}.\n")
+            append("Нелюбимые продукты: ${it.dislikedIngredients.joinToString().ifEmpty { "нет" }}.\n")
+            append("Аллергии и ограничения: ${it.allergies.joinToString().ifEmpty { "нет" }}.")
+        }
+    } ?: "Профиль пользователя недоступен."
+
+    private fun recommendedNormText(norm: Norm?): String = norm?.let {
+        "Рекомендованная цель: ${it.calories} ккал, белки ${it.protein} г, жиры ${it.fats} г, углеводы ${it.carbs} г."
+    } ?: "Рекомендованная цель недоступна."
+
+    private fun userNormText(userNorm: Map<String, Int>?): String = userNorm?.let {
+        "Пользовательская цель: ${it["calories"] ?: "?"} ккал, белки ${it["protein"] ?: "?"} г, жиры ${it["fats"] ?: "?"} г, углеводы ${it["carbs"] ?: "?"} г."
+    } ?: "Пользовательская цель не задана."
+
+    private fun fridgeDescription(fridge: List<FridgeProduct>): String =
+        if (fridge.isEmpty()) {
+            "Список холодильника пуст."
         } else {
-            "Нет явных нелюбимых блюд по поведению."
+            fridge.joinToString(separator = "\n") { product ->
+                val unitLabel = if (product.unitType == QuantityUnit.PIECES) "шт." else "г"
+                val available = product.availableGrams?.let { "$it $unitLabel" } ?: "количество не указано"
+                "${product.name}: на 100 г ${product.calories100}/${product.protein100}/${product.fats100}/${product.carbs100}, доступно $available"
+            }
         }
 
-        val systemPrompt = """
-            Ты нутриционист. Нужна ЗАМЕНА одного приёма пищи.
-            Верни строго JSON.
-            Формат:
-            {
-              "mealType": "BREAKFAST" | "LUNCH" | "DINNER" | "SNACK" | "OTHER",
-              "items": [
-                 {"name": "...", "grams": N, "calories": N, "protein": N, "fats": N, "carbs": N}
-              ]
-            }
-
-            Требования:
-            - Никогда не предлагай блюда из списка dislikedByBehavior (то, что пользователь часто заменяет или избегает).
-        """.trimIndent()
-
-        val userPrompt = """
-            Дата: $date
-
-            Нужно заменить приём пищи: ${mealType.name}
-            Комментарий пользователя: ${comment ?: "нет"}
-
-            Профиль:
-            $profileDescription
-
-            $recommendedNormText
-            $userNormText
-            $behaviorDislikedText
-
-            Целевые макросы текущего плана: ${currentPlan.targetCalories} ккал, белки ${currentPlan.targetProtein} г, жиры ${currentPlan.targetFat} г, углеводы ${currentPlan.targetCarbs} г.
-
-            Текущий план (meals в JSON): ${gson.toJson(currentPlan.meals)}
-
-            Подбери аналогичный по калорийности и макросам приём, но учти комментарий пользователя и избегай аллергии/нелюбимых продуктов.
-            Учитывай dislikedByBehavior — это блюда, которые пользователь часто заменяет, их нельзя предлагать.
-            Верни только один приём пищи строго в JSON без дополнительного текста.
-        """.trimIndent()
-
-        val requestBody = ChatCompletionRequest(
-            model = LlmConfig.MODEL_ID,
-            messages = listOf(
-                ChatMessage(role = "system", content = systemPrompt),
-                ChatMessage(role = "user", content = userPrompt)
-            )
+    private fun resolveTargets(recommendedNorm: Norm?, userNorm: Map<String, Int>?): PlanTargets {
+        val defaultNorm = mapOf(
+            "calories" to 2000,
+            "protein" to 120,
+            "fats" to 70,
+            "carbs" to 250
         )
 
-        val jsonBody = gson.toJson(requestBody)
-        val body = jsonBody.toRequestBody(mediaTypeJson)
-
-        val url = LlmConfig.BASE_URL.trimEnd('/') + "/chat/completions"
-
-        val request = Request.Builder()
-            .url(url)
-            .post(body)
-            .build()
-
-        val responseText = client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                val errorText = response.body?.string()
-                throw IllegalStateException("Ошибка LLM API: ${response.code} ${response.message} $errorText")
-            }
-
-            response.body?.string()
-                ?: throw IllegalStateException("Пустой ответ от LLM API")
-        }
-
-        val chatResponse = gson.fromJson(responseText, ChatCompletionResponse::class.java)
-
-        val content = chatResponse.choices.firstOrNull()?.message?.content
-            ?: throw IllegalStateException("Пустой content в ответе модели")
-
-        val rootElement = gson.fromJson(content, com.google.gson.JsonElement::class.java)
-
-        val json: JsonObject = when {
-            rootElement.isJsonObject -> rootElement.asJsonObject
-            rootElement.isJsonPrimitive && rootElement.asJsonPrimitive.isString -> {
-                val inner = rootElement.asJsonPrimitive.asString
-                gson.fromJson(inner, JsonObject::class.java)
-            }
-            else -> {
-                throw IllegalStateException("Ожидался JSON-объект приёма пищи, но пришло: $rootElement")
-            }
-        }
-
-        val typeStr = when {
-            json.has("mealType") -> json.get("mealType").asString
-            json.has("type") -> json.get("type").asString
-            else -> throw IllegalStateException("В ответе отсутствует поле mealType/type")
-        }
-        val type = MealType.valueOf(typeStr.uppercase(Locale.ROOT))
-
-        val itemsJson = json.getAsJsonArray("items")
-            ?: throw IllegalStateException("В ответе нет массива items")
-
-        val items = itemsJson.map { element ->
-            val obj = element.asJsonObject
-            PlannedFoodItem(
-                name = obj.get("name")?.asString
-                    ?: throw IllegalStateException("У блюда нет имени"),
-                grams = obj.get("grams")?.asInt ?: 0,
-                calories = obj.get("calories")?.asInt
-                    ?: throw IllegalStateException("У блюда нет калорийности"),
-                protein = obj.get("protein")?.asInt
-                    ?: throw IllegalStateException("У блюда нет белков"),
-                fat = obj.get("fat")?.asInt ?: obj.get("fats")?.asInt
-                    ?: throw IllegalStateException("У блюда нет жиров"),
-                carbs = obj.get("carbs")?.asInt
-                    ?: throw IllegalStateException("У блюда нет углеводов")
-            )
-        }
-
-        PlannedMeal(
-            type = type,
-            items = items
+        return PlanTargets(
+            calories = userNorm?.get("calories") ?: recommendedNorm?.calories ?: defaultNorm.getValue("calories"),
+            protein = (userNorm?.get("protein") ?: recommendedNorm?.protein ?: defaultNorm.getValue("protein")).coerceAtLeast(0),
+            fats = (userNorm?.get("fats") ?: recommendedNorm?.fats ?: defaultNorm.getValue("fats")).coerceAtLeast(0),
+            carbs = (userNorm?.get("carbs") ?: recommendedNorm?.carbs ?: defaultNorm.getValue("carbs")).coerceAtLeast(0)
         )
+    }
+
+    private fun containsLatinText(value: String): Boolean = LATIN_REGEX.containsMatchIn(value)
+
+    private fun containsLatinResult(plan: Any?): Boolean = when (plan) {
+        is PlannedMeal -> plan.items.any { containsLatinText(it.name) }
+        is List<*> -> plan.filterIsInstance<PlannedMeal>().any { containsLatinResult(it) }
+        else -> false
     }
 
     private fun goalToText(goal: Goal): String = when (goal) {
-        Goal.LOSE_WEIGHT -> "похудение"
-        Goal.MAINTAIN_WEIGHT -> "поддержание веса"
-        Goal.GAIN_WEIGHT -> "набор веса"
-        Goal.DIET -> "диета"
+        Goal.LOSE_WEIGHT -> "снижение веса"
+        Goal.MAINTAIN_WEIGHT -> "поддержание"
+        Goal.GAIN_WEIGHT -> "набор массы"
+        Goal.DIET -> "лечебное питание"
     }
 
     companion object {
+        private val LATIN_REGEX = Regex("[A-Za-z]")
+
         @Volatile
         private var instances: MutableMap<String, NutritionAiRepository> = mutableMapOf()
 
@@ -812,3 +668,16 @@ class NutritionAiRepository private constructor(context: Context, private val us
         }
     }
 }
+
+private data class PlanTargets(
+    val calories: Int,
+    val protein: Int,
+    val fats: Int,
+    val carbs: Int
+)
+
+private fun JsonObject.string(name: String): String? =
+    if (has(name) && !get(name).isJsonNull) get(name).asString else null
+
+private fun JsonObject.int(name: String): Int? =
+    if (has(name) && !get(name).isJsonNull) get(name).asInt else null

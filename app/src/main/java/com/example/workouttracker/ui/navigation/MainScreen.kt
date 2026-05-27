@@ -1,6 +1,5 @@
 package com.example.workouttracker.ui.navigation
 
-import android.app.Application
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -11,6 +10,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -21,42 +21,42 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
-import com.example.workouttracker.ui.achievements.AchievementsScreen
-import com.example.workouttracker.ui.analytics.AnalyticsScreen
-import com.example.workouttracker.ui.articles.ArticlesScreen
-import com.example.workouttracker.ui.profile.ProfileScreen
+import com.example.workouttracker.feature.analytics.presentation.AnalyticsScreen
+import com.example.workouttracker.feature.analytics.presentation.AnalyticsViewModel
+import com.example.workouttracker.feature.nutrition.presentation.NutritionScreen
+import com.example.workouttracker.feature.nutrition.presentation.NutritionViewModel
+import com.example.workouttracker.feature.profile.presentation.ProfileRoute
+import com.example.workouttracker.feature.training.presentation.TrainingScreen
+import com.example.workouttracker.feature.training.presentation.TrainingViewModel
 import com.example.workouttracker.ui.theme.ThemeVariant
-import com.example.workouttracker.ui.training.TrainingScreen
-import com.example.workouttracker.ui.nutrition.NutritionScreen
-import com.example.workouttracker.viewmodel.AchievementViewModel
-import com.example.workouttracker.viewmodel.AchievementViewModelFactory
-import com.example.workouttracker.viewmodel.ArticleViewModel
-import com.example.workouttracker.viewmodel.ArticleViewModelFactory
 import com.example.workouttracker.viewmodel.AuthViewModel
-import com.example.workouttracker.viewmodel.TrainingViewModel
 
 @Composable
 fun MainScreen(
@@ -64,26 +64,17 @@ fun MainScreen(
     currentTheme: ThemeVariant,
     onToggleTheme: () -> Unit = {}
 ) {
-    val trainingViewModel: TrainingViewModel = viewModel()
-    val context = LocalContext.current
-    val application = context.applicationContext as Application
+    val trainingViewModel: TrainingViewModel = hiltViewModel()
+    val nutritionViewModel: NutritionViewModel = hiltViewModel()
+    val analyticsViewModel: AnalyticsViewModel = hiltViewModel()
+    val authViewModel: AuthViewModel = hiltViewModel()
 
-    val articleViewModel: ArticleViewModel = viewModel(
-        factory = ArticleViewModelFactory(trainingViewModel, application)
-    )
-    val authViewModel: AuthViewModel = viewModel()
-    val achievementViewModel: AchievementViewModel = viewModel(
-        factory = AchievementViewModelFactory(trainingViewModel, articleViewModel, application)
-    )
-
-    var selectedRoute by remember { mutableStateOf(BottomNavItem.Training.route) }
+    var selectedRoute by rememberSaveable { mutableStateOf(BottomNavItem.Training.route) }
     val items = remember {
         listOf(
             BottomNavItem.Training,
             BottomNavItem.Nutrition,
             BottomNavItem.Analytics,
-            BottomNavItem.Articles,
-            BottomNavItem.Achieve,
             BottomNavItem.Profile
         )
     }
@@ -102,8 +93,8 @@ fun MainScreen(
                     MainContent(
                         selectedRoute = selectedRoute,
                         trainingViewModel = trainingViewModel,
-                        articleViewModel = articleViewModel,
-                        achievementViewModel = achievementViewModel,
+                        nutritionViewModel = nutritionViewModel,
+                        analyticsViewModel = analyticsViewModel,
                         authViewModel = authViewModel,
                         navController = navController,
                         currentTheme = currentTheme,
@@ -125,8 +116,8 @@ fun MainScreen(
                     MainContent(
                         selectedRoute = selectedRoute,
                         trainingViewModel = trainingViewModel,
-                        articleViewModel = articleViewModel,
-                        achievementViewModel = achievementViewModel,
+                        nutritionViewModel = nutritionViewModel,
+                        analyticsViewModel = analyticsViewModel,
                         authViewModel = authViewModel,
                         navController = navController,
                         currentTheme = currentTheme,
@@ -142,8 +133,8 @@ fun MainScreen(
 private fun MainContent(
     selectedRoute: String,
     trainingViewModel: TrainingViewModel,
-    articleViewModel: ArticleViewModel,
-    achievementViewModel: AchievementViewModel,
+    nutritionViewModel: NutritionViewModel,
+    analyticsViewModel: AnalyticsViewModel,
     authViewModel: AuthViewModel,
     navController: NavController,
     currentTheme: ThemeVariant,
@@ -152,19 +143,21 @@ private fun MainContent(
     AnimatedContent(
         targetState = selectedRoute,
         transitionSpec = {
-            (fadeIn(tween(220)) + scaleIn(initialScale = 0.98f)).togetherWith(
-                fadeOut(tween(160)) + scaleOut(targetScale = 0.99f)
+            (fadeIn(tween(220)) + scaleIn(initialScale = 0.985f)).togetherWith(
+                fadeOut(tween(160)) + scaleOut(targetScale = 0.995f)
             )
         },
         label = "main_screen_animation"
     ) { route ->
         when (route) {
             BottomNavItem.Training.route -> TrainingScreen(trainingViewModel)
-            BottomNavItem.Nutrition.route -> NutritionScreen()
-            BottomNavItem.Analytics.route -> AnalyticsScreen()
-            BottomNavItem.Articles.route -> ArticlesScreen(trainingViewModel, articleViewModel)
-            BottomNavItem.Achieve.route -> AchievementsScreen(achievementViewModel = achievementViewModel)
-            BottomNavItem.Profile.route -> ProfileScreen(
+            BottomNavItem.Nutrition.route -> NutritionScreen(viewModel = nutritionViewModel)
+            BottomNavItem.Analytics.route -> AnalyticsScreen(
+                trainingViewModel = trainingViewModel,
+                nutritionViewModel = nutritionViewModel,
+                analyticsViewModel = analyticsViewModel
+            )
+            BottomNavItem.Profile.route -> ProfileRoute(
                 authViewModel = authViewModel,
                 onLogout = {
                     authViewModel.logout()
@@ -183,25 +176,38 @@ fun SmoothNavigationBar(
     selectedRoute: String,
     onItemSelected: (String) -> Unit
 ) {
-    NavigationBar(
-        containerColor = MaterialTheme.colorScheme.surface,
-        tonalElevation = 8.dp
+    Surface(
+        tonalElevation = 6.dp,
+        shadowElevation = 10.dp,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
     ) {
-        items.forEach { item ->
-            val selected = selectedRoute == item.route
-            NavigationBarItem(
-                selected = selected,
-                onClick = { onItemSelected(item.route) },
-                icon = {
-                    NavIconWithSmoothAnimation(
-                        icon = item.icon,
-                        title = item.title,
-                        selected = selected
-                    )
-                },
-                label = null,
-                alwaysShowLabel = false
-            )
+        NavigationBar(
+            containerColor = MaterialTheme.colorScheme.surface,
+            tonalElevation = 0.dp
+        ) {
+            items.forEach { item ->
+                val selected = selectedRoute == item.route
+                NavigationBarItem(
+                    selected = selected,
+                    onClick = { onItemSelected(item.route) },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        selectedTextColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                        unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    ),
+                    icon = {
+                        NavIconWithSmoothAnimation(
+                            icon = item.icon,
+                            title = item.title,
+                            selected = selected
+                        )
+                    },
+                    label = null,
+                    alwaysShowLabel = false
+                )
+            }
         }
     }
 }
@@ -213,7 +219,9 @@ private fun AdaptiveNavigationRail(
     onItemSelected: (String) -> Unit
 ) {
     NavigationRail(
-        modifier = Modifier.fillMaxHeight(),
+        modifier = Modifier
+            .fillMaxHeight()
+            .background(MaterialTheme.colorScheme.surface),
         containerColor = MaterialTheme.colorScheme.surface,
         header = {
             Icon(
@@ -234,7 +242,13 @@ private fun AdaptiveNavigationRail(
                 icon = {
                     NavIconWithSmoothAnimation(icon = item.icon, title = item.title, selected = selected)
                 },
-                label = { Text(text = item.title, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                label = {
+                    Text(
+                        text = item.title,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             )
         }
     }
@@ -247,7 +261,7 @@ fun NavIconWithSmoothAnimation(
     selected: Boolean
 ) {
     val scale by animateFloatAsState(
-        targetValue = if (selected) 1.16f else 1f,
+        targetValue = if (selected) 1.12f else 1f,
         animationSpec = tween(durationMillis = 250, easing = FastOutSlowInEasing),
         label = "nav_scale"
     )
@@ -261,13 +275,13 @@ fun NavIconWithSmoothAnimation(
             imageVector = icon,
             contentDescription = title,
             modifier = Modifier
-                .size(26.dp)
+                .size(24.dp)
                 .scale(scale)
         )
         AnimatedVisibility(visible = selected, enter = fadeIn(), exit = fadeOut()) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
